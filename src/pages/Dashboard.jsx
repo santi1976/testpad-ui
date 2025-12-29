@@ -303,6 +303,7 @@ function Dashboard() {
                   // Use run.progress first (run-specific), fallback to run.results if available
                   progress: run.progress || (run.results ? calculateProgressFromResults(run.results, scriptDetails.tests) : null),
                   tests: scriptDetails.tests || [], // Include tests to show in side panel
+                  results: run.results || {}, // Include results to identify blocked/failed tests
                   // Use state from API if available, otherwise will be determined later based on percentage
                   state: run.state || null, // API should provide state, if not we'll determine it from percentage
                   created: run.created || run.headers?._createdDate || new Date().toISOString()
@@ -523,6 +524,7 @@ function Dashboard() {
                       userInfo: userInfo,
                       progress: run.progress || (run.results ? calculateProgressFromResults(run.results, scriptDetails.tests) : null),
                       tests: scriptDetails.tests || [],
+                      results: run.results || {}, // Include results to identify blocked/failed tests
                       state: run.state || null,
                       created: run.created || run.headers?._createdDate || new Date().toISOString()
                     })
@@ -630,27 +632,23 @@ function Dashboard() {
     
     // Filter by status
     if (selectedState !== 'all') {
-      // Determine the effective state if not already set
-      let effectiveState = run.state
-      if (!effectiveState) {
-        const progress = run.progress || {}
-        const total = progress.total || 0
-        const pass = progress.pass || 0
-        const fail = progress.fail || 0
-        const block = progress.block || 0
-        const completed = pass + fail + block
-        
-        if (total > 0 && completed === total) {
-          effectiveState = 'completed'
-        } else if (completed > 0) {
-          effectiveState = 'started'
-        } else {
-          effectiveState = 'new'
-        }
+      // ALWAYS calculate state from progress (API state can be wrong or use different naming)
+      const progress = run.progress || {}
+      const total = progress.total || 0
+      const pass = progress.pass || 0
+      const fail = progress.fail || 0
+      const block = progress.block || 0
+      const completedCount = pass + fail + block
+      
+      let effectiveState = 'new'
+      if (total > 0 && completedCount === total) {
+        effectiveState = 'completed'
+      } else if (completedCount > 0) {
+        effectiveState = 'started'
       }
       
       // Check for blocks/fails (issues)
-      const hasIssues = run.progress && (run.progress.block > 0 || run.progress.fail > 0)
+      const hasIssues = block > 0 || fail > 0
       
       if (selectedState === 'active' && effectiveState !== 'started') return false
       if (selectedState === 'completed' && effectiveState !== 'completed') return false
@@ -1416,27 +1414,21 @@ function Dashboard() {
                           percentage = 0
                         }
                         
-                        // Use state from API if available, otherwise determine it based on percentage
-                        // - 100% → 'completed'
-                        // - > 0% but < 100% → 'started'
-                        // - 0% → 'new'
-                        let runState = run.state
-                        if (!runState) {
-                          // Only determine state from percentage if API didn't provide it
-                          if (percentage === 100) {
-                            runState = 'completed'
-                          } else if (percentage > 0) {
-                            runState = 'started'
-                          } else {
-                            runState = 'new'
-                          }
-                          // Update the run's state for display
-                          run.state = runState
+                        // ALWAYS determine state from percentage (API state can be wrong or use 'complete' vs 'completed')
+                        let runState
+                        if (percentage === 100) {
+                          runState = 'completed'
+                        } else if (percentage > 0) {
+                          runState = 'started'
+                        } else {
+                          runState = 'new'
                         }
-                        // If API provided state, use it as-is (don't override)
+                        // Update the run's state for display
+                        run.state = runState
+                        
                         // Check if this script's card is selected (compare by scriptId, not run.id)
                         const isSelected = selectedRun?.script?.id === scriptId
-                        const isActive = run.state === 'started'
+                        const isActive = runState === 'started'
                         const hasIssues = failed > 0 || blocked > 0
 
                         // Create unique key for script (one card per script)

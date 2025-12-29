@@ -1,9 +1,9 @@
 import React from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Typography, Card, Tag, Spin, Alert, Button, Table, Breadcrumb, Progress, Space, Select, Avatar, message } from 'antd'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Layout, Typography, Card, Tag, Spin, Alert, Button, Table, Breadcrumb, Progress, Space, Avatar, Select } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { HomeOutlined, UserOutlined } from '@ant-design/icons'
-import { assignTestSuite, unassignTestSuite, apiGet } from '../utils/api'
+import { apiGet } from '../utils/api'
 import Navbar from '../components/Navbar'
 
 const { Content } = Layout
@@ -38,7 +38,9 @@ function TestSuiteDetails() {
   const { scriptId } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
-  const queryClient = useQueryClient()
+  
+  // State to select which run to show (default to first/oldest)
+  const [selectedRunIndex, setSelectedRunIndex] = React.useState(0)
   
   // Get navigation state information (project and folder)
   const { project, folder } = location.state || {}
@@ -53,56 +55,8 @@ function TestSuiteDetails() {
   // Get script from response
   const script = scriptData?.script || scriptData
 
-  // Get assigned user (if exists)
-  const assignedUser = script?.assigned_to || script?.assignee || script?.assigned_user || null
-
-  // TEST MODE: Only allow assigning to these users
-  const ALLOWED_USERS = [
-    'santiso@gmail.com',
-    'santiago.riveira@bitfinex.com'
-  ]
-
-  // In test mode, only use allowed users
-  const users = ALLOWED_USERS
-
-  // Mutation to assign
-  const assignMutation = useMutation({
-    mutationFn: (userEmail) => assignTestSuite(scriptId, userEmail),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['script', scriptId])
-      message.success('Test Suite assigned successfully')
-    },
-    onError: (error) => {
-      message.error(`Error assigning: ${error.message}`)
-    }
-  })
-
-  // Mutation to unassign
-  const unassignMutation = useMutation({
-    mutationFn: () => unassignTestSuite(scriptId),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['script', scriptId])
-      message.success('Test Suite unassigned successfully')
-    },
-    onError: (error) => {
-      message.error(`Error unassigning: ${error.message}`)
-    }
-  })
-
-  // Debug: See what real data the API returns
-  React.useEffect(() => {
-    if (script) {
-      console.log('📊 Script data completo:', script)
-      console.log('📊 Keys disponibles:', Object.keys(script))
-      if (script.progress) console.log('📊 Progress:', script.progress)
-      if (script.runs) console.log('📊 Runs:', script.runs)
-      if (script.results) console.log('📊 Results:', script.results)
-      if (script.tests) console.log('📊 Tests (primeros 3):', script.tests.slice(0, 3))
-    }
-  }, [script])
-
-  // State to select which run to show (default to first/oldest)
-  const [selectedRunIndex, setSelectedRunIndex] = React.useState(0)
+  // Get selected run info for display
+  const selectedRun = script?.runs?.[selectedRunIndex] || script?.runs?.[0] || null
 
   // Get information from selected run (default to first)
   const getSelectedRunInfo = () => {
@@ -479,45 +433,6 @@ function TestSuiteDetails() {
                     <Text>{formatDate(script.created)}</Text>
                   </div>
                 )}
-                <div style={{ marginLeft: 'auto' }}>
-                  <Space>
-                    <Text strong style={{ fontSize: '12px' }}>Assigned to:</Text>
-                    {assignedUser ? (
-                      <Space>
-                        <Avatar size="small" style={{ backgroundColor: '#1890ff' }}>
-                          {getInitials(assignedUser)}
-                        </Avatar>
-                        <Text style={{ fontSize: '12px' }}>{assignedUser}</Text>
-                        <Button 
-                          size="small" 
-                          onClick={() => unassignMutation.mutate()}
-                          loading={unassignMutation.isLoading}
-                        >
-                          Unassign
-                        </Button>
-                      </Space>
-                    ) : (
-                      <Select
-                        placeholder="Select user"
-                        style={{ width: 250 }}
-                        onChange={(userEmail) => assignMutation.mutate(userEmail)}
-                        loading={assignMutation.isLoading || !users.length}
-                        disabled={users.length === 0}
-                      >
-                        {users.map(user => (
-                          <Option key={user} value={user}>
-                            <Space>
-                              <Avatar size="small" style={{ backgroundColor: '#1890ff' }}>
-                                {getInitials(user)}
-                              </Avatar>
-                              {user}
-                            </Space>
-                          </Option>
-                        ))}
-                      </Select>
-                    )}
-                  </Space>
-                </div>
               </div>
             </Card>
 
@@ -579,4 +494,3 @@ function TestSuiteDetails() {
 }
 
 export default TestSuiteDetails
-
