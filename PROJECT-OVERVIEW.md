@@ -493,45 +493,7 @@ Given these limitations, we made the following architectural decisions:
 - Reflects real-time state from Testpad API
 - **Limitation:** Assignment info may be incomplete
 
-#### Future Improvements (Optional)
 
-To fully resolve these limitations, the following would be required:
-
-**Option A: Local Database**
-```
-Schema: {
-  runId: number,
-  assignedTo: string,
-  assignedAt: timestamp,
-  emailSentAt: timestamp,
-  assignedFrom: 'create_run' | 'assignments_page'
-}
-```
-- **Pros:** Track our own assignments
-- **Cons:** Still can't track Testpad-native assignments; data becomes stale
-
-**Option B: Testpad API Enhancement**
-- Request Testpad to expose:
-  - Assignment history endpoint
-  - Email sent status
-  - Assignment timestamps
-- **Pros:** Single source of truth
-- **Cons:** Depends on third-party development
-
-**Option C: Webhook Integration**
-- If Testpad supports webhooks:
-  - Listen for assignment events
-  - Sync to local database
-  - Maintain accurate state
-- **Pros:** Real-time sync
-- **Cons:** Requires Testpad webhook support
-
-#### Recommendations for Users
-
-1. **Choose one interface:** Use either this app OR Testpad's native interface for assignments, not both
-2. **Trust the state:** If a run shows `started` or `completed`, it's definitely being/was tested
-3. **When in doubt:** Check Testpad directly for the most accurate assignment info
-4. **Batch assign early:** Use "Assignments & Email" right after creating runs to avoid confusion
 
 #### Summary
 
@@ -575,13 +537,8 @@ await assignAndSendEmail(scriptId, runId, email, scriptName)
 
 ## 🔮 Future Improvements
 
-1. **Shared Sessions** - Use Redis for sessions in production
-2. **Rate Limiting** - Protect backend endpoints
-3. **Logging** - Centralized logging system
-4. **Error Handling** - Improve error messages and recovery
-5. **Tests** - Add unit and integration tests
-6. **TypeScript** - Migrate to TypeScript for better type safety
-7. **Folder/Version Archiving** - Automatically archive current folder/version and generate the next one
+
+1. **Folder/Version Archiving** - Automatically archive current folder/version and generate the next one
    - Implement automatic versioning system
    - Archive old versions when creating new ones
    - Maintain version history and rollback capability
