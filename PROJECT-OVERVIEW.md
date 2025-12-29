@@ -352,7 +352,7 @@ According to the official API documentation (`TESTPAD-API-OFFICIAL.md`) and our 
 - **Note:** Email/notification functionality is typically part of REST APIs (e.g., `POST /runs/{id}/send-email` or `POST /runs/{id}/notify`), but Testpad's official API does not include these endpoints yet
 - **Workaround:** We discovered and use internal web endpoints (`/a/script/{id}/run/{id}/sendemail`) via programmatic login
 
-### How We Discovered `setmeta` and `sendemail`
+### `setmeta` and `sendemail`
 
 Since the official REST API doesn't support assigning runs or sending emails, we reverse-engineered the web interface to find the internal endpoints:
 
