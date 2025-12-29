@@ -51,25 +51,6 @@ npm run dev
 
 The application will be available at `http://localhost:5173`
 
-### 4. Build for Production
-```bash
-npm run build
-```
-
-### 5. Share the Project
-
-To share the project (e.g., via Google Drive), create a ZIP file excluding sensitive files:
-
-```bash
-# Option 1: Use the provided script
-./create-zip.sh
-
-# Option 2: Manual ZIP (exclude .env, node_modules, dist)
-zip -r testpad-ui.zip . -x "*.env*" -x "node_modules/*" -x "dist/*" -x ".git/*"
-```
-
-**⚠️ IMPORTANT:** Before sharing, verify that `.env` is NOT included in the ZIP!
-
 ## Features
 
 - **Visualize** test runs with advanced filters

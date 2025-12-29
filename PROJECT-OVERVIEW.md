@@ -289,9 +289,6 @@ npm run dev
 # Vite only (frontend only, no backend)
 npm run dev:vite
 
-# Production build
-npm run build
-
 # Preview build
 npm run preview
 ```
