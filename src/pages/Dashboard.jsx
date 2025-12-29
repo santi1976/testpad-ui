@@ -630,9 +630,31 @@ function Dashboard() {
     
     // Filter by status
     if (selectedState !== 'all') {
-      if (selectedState === 'active' && run.state !== 'started') return false
-      if (selectedState === 'completed' && run.state !== 'completed') return false
-      if (selectedState === 'blocked' && (!run.progress || run.progress.block === 0)) return false
+      // Determine the effective state if not already set
+      let effectiveState = run.state
+      if (!effectiveState) {
+        const progress = run.progress || {}
+        const total = progress.total || 0
+        const pass = progress.pass || 0
+        const fail = progress.fail || 0
+        const block = progress.block || 0
+        const completed = pass + fail + block
+        
+        if (total > 0 && completed === total) {
+          effectiveState = 'completed'
+        } else if (completed > 0) {
+          effectiveState = 'started'
+        } else {
+          effectiveState = 'new'
+        }
+      }
+      
+      // Check for blocks/fails (issues)
+      const hasIssues = run.progress && (run.progress.block > 0 || run.progress.fail > 0)
+      
+      if (selectedState === 'active' && effectiveState !== 'started') return false
+      if (selectedState === 'completed' && effectiveState !== 'completed') return false
+      if (selectedState === 'blocked' && !hasIssues) return false
     }
     
     return true
@@ -1010,14 +1032,14 @@ function Dashboard() {
               <div>
                 <Text strong style={{ marginRight: 8 }}>Status:</Text>
                 <Select
-                  style={{ width: 150 }}
+                  style={{ width: 160 }}
                   value={selectedState}
                   onChange={setSelectedState}
                 >
                   <Option value="all">All</Option>
-                  <Option value="active">Active</Option>
+                  <Option value="active">In Progress</Option>
                   <Option value="completed">Completed</Option>
-                  <Option value="blocked">With Blocks</Option>
+                  <Option value="blocked">With Issues</Option>
                 </Select>
               </div>
               <div>
