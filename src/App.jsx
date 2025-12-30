@@ -330,31 +330,23 @@ function App() {
                   }}
                   onMouseEnter={(e) => {
                     if (!isSelected) {
-                      // Light mode - Darker on hover
+                      // Light mode - Subtle hover effect
                       e.currentTarget.style.background = '#cbd5e1'
                       e.currentTarget.style.borderColor = '#64748b'
                       e.currentTarget.style.color = '#0f172a'
-                      // Dark mode: e.currentTarget.style.background = 'rgba(255, 255, 255, 0.35)'
-                      // Dark mode: e.currentTarget.style.color = '#fff'
-                      e.currentTarget.style.transform = 'translateX(4px)'
-                      e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)'
+                      e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.12)'
                     } else {
-                      e.currentTarget.style.transform = 'translateX(2px)'
-                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(24, 144, 255, 0.4), 0 2px 6px rgba(24, 144, 255, 0.3)'
+                      e.currentTarget.style.boxShadow = '0 5px 14px rgba(24, 144, 255, 0.35)'
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (!isSelected) {
-                      // Light mode - Return to darker inactive state (visible contrast)
+                      // Light mode - Return to inactive state
                       e.currentTarget.style.background = '#e2e8f0'
                       e.currentTarget.style.borderColor = '#94a3b8'
                       e.currentTarget.style.color = '#1e293b'
-                      // Dark mode: e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)'
-                      // Dark mode: e.currentTarget.style.color = '#fff'
-                      e.currentTarget.style.transform = 'translateX(0)'
                       e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)'
                     } else {
-                      e.currentTarget.style.transform = 'translateX(0)'
                       e.currentTarget.style.boxShadow = '0 4px 12px rgba(24, 144, 255, 0.3), 0 2px 4px rgba(24, 144, 255, 0.2)'
                     }
                   }}

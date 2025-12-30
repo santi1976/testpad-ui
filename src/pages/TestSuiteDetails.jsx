@@ -2,7 +2,7 @@ import React from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Layout, Typography, Card, Tag, Spin, Alert, Button, Table, Breadcrumb, Progress, Space, Avatar, Select } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { HomeOutlined, UserOutlined } from '@ant-design/icons'
+import { HomeOutlined, UserOutlined, WarningOutlined, CloseCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import { apiGet } from '../utils/api'
 import Navbar from '../components/Navbar'
 
@@ -34,6 +34,32 @@ function formatDate(iso) {
   }
 }
 
+// Get tests with issues from a run
+function getTestsWithIssues(run, tests) {
+  const issues = []
+  if (!run?.results || !tests) return issues
+  
+  Object.entries(run.results).forEach(([testId, result]) => {
+    const status = result?.result || result
+    if (status === 'fail' || status === 'block' || status === 'failed' || status === 'blocked') {
+      const test = tests.find(t => String(t.id) === String(testId))
+      const testIndex = tests.findIndex(t => String(t.id) === String(testId))
+      
+      if (test) {
+        issues.push({
+          id: testId,
+          number: testIndex + 1,
+          text: test.text || test.name || 'Unknown test',
+          status: status === 'fail' || status === 'failed' ? 'fail' : 'block'
+        })
+      }
+    }
+  })
+  
+  issues.sort((a, b) => a.number - b.number)
+  return issues
+}
+
 function TestSuiteDetails() {
   const { scriptId } = useParams()
   const navigate = useNavigate()
@@ -41,9 +67,18 @@ function TestSuiteDetails() {
   
   // State to select which run to show (default to first/oldest)
   const [selectedRunIndex, setSelectedRunIndex] = React.useState(0)
+  // State for filtering tests
+  const [testFilter, setTestFilter] = React.useState('all') // 'all', 'failed', 'blocked', 'issues'
   
-  // Get navigation state information (project and folder)
-  const { project, folder } = location.state || {}
+  // Get navigation state information (project, folder, and highlight settings)
+  const { project, folder, runIndex: initialRunIndex, highlightIssues } = location.state || {}
+  
+  // Set initial run index from navigation state
+  React.useEffect(() => {
+    if (initialRunIndex !== undefined) {
+      setSelectedRunIndex(initialRunIndex)
+    }
+  }, [initialRunIndex])
 
   // Load script/test suite details
   const { data: scriptData, isLoading: scriptLoading, error: scriptError } = useQuery({
@@ -436,8 +471,60 @@ function TestSuiteDetails() {
               </div>
             </Card>
 
+            {/* Alert Banner for Issues */}
+            {runInfo && (runInfo.stats.failed > 0 || runInfo.stats.blocked > 0) && (
+              <Alert
+                type={runInfo.stats.failed > 0 ? 'error' : 'warning'}
+                showIcon
+                icon={runInfo.stats.failed > 0 ? <CloseCircleOutlined /> : <ExclamationCircleOutlined />}
+                style={{ marginBottom: 16 }}
+                message={
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                    <div>
+                      <Text strong>
+                        {(runInfo.stats.failed || 0) + (runInfo.stats.blocked || 0)} test{(runInfo.stats.failed || 0) + (runInfo.stats.blocked || 0) > 1 ? 's' : ''} need attention in this run
+                      </Text>
+                      <Text style={{ marginLeft: 8 }}>
+                        {runInfo.stats.failed > 0 && `${runInfo.stats.failed} failed`}
+                        {runInfo.stats.failed > 0 && runInfo.stats.blocked > 0 && ', '}
+                        {runInfo.stats.blocked > 0 && `${runInfo.stats.blocked} blocked`}
+                      </Text>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {runInfo.stats.failed > 0 && (
+                        <Button 
+                          size="small" 
+                          danger 
+                          onClick={() => {
+                            setTestFilter('failed')
+                            // Scroll to table
+                            document.getElementById('test-cases-table')?.scrollIntoView({ behavior: 'smooth' })
+                          }}
+                        >
+                          Jump to Failed ↓
+                        </Button>
+                      )}
+                      {runInfo.stats.blocked > 0 && (
+                        <Button 
+                          size="small" 
+                          style={{ background: '#faad14', borderColor: '#faad14', color: 'white' }}
+                          onClick={() => {
+                            setTestFilter('blocked')
+                            document.getElementById('test-cases-table')?.scrollIntoView({ behavior: 'smooth' })
+                          }}
+                        >
+                          Jump to Blocked ↓
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                }
+              />
+            )}
+
             {/* Tabla compacta de Test Cases */}
             <Card 
+              id="test-cases-table"
               title={
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Text strong>Test Cases</Text>
@@ -446,44 +533,182 @@ function TestSuiteDetails() {
                   )}
                 </div>
               }
+              extra={
+                runInfo && (runInfo.stats.failed > 0 || runInfo.stats.blocked > 0) && (
+                  <Space>
+                    <Button 
+                      size="small" 
+                      type={testFilter === 'all' ? 'primary' : 'default'}
+                      onClick={() => setTestFilter('all')}
+                    >
+                      All ({script.tests?.length || 0})
+                    </Button>
+                    {runInfo.stats.failed > 0 && (
+                      <Button 
+                        size="small" 
+                        type={testFilter === 'failed' ? 'primary' : 'default'}
+                        danger={testFilter === 'failed'}
+                        onClick={() => setTestFilter('failed')}
+                      >
+                        Failed ({runInfo.stats.failed})
+                      </Button>
+                    )}
+                    {runInfo.stats.blocked > 0 && (
+                      <Button 
+                        size="small" 
+                        type={testFilter === 'blocked' ? 'primary' : 'default'}
+                        style={testFilter === 'blocked' ? { background: '#faad14', borderColor: '#faad14' } : {}}
+                        onClick={() => setTestFilter('blocked')}
+                      >
+                        Blocked ({runInfo.stats.blocked})
+                      </Button>
+                    )}
+                    <Button 
+                      size="small" 
+                      type={testFilter === 'issues' ? 'primary' : 'default'}
+                      onClick={() => setTestFilter('issues')}
+                    >
+                      All Issues ({(runInfo.stats.failed || 0) + (runInfo.stats.blocked || 0)})
+                    </Button>
+                  </Space>
+                )
+              }
             >
               {script.tests && Array.isArray(script.tests) && script.tests.length > 0 ? (
-                <Table
-                  dataSource={script.tests.map((test, index) => ({ ...test, key: test.id || index, _index: index + 1 }))}
-                  pagination={{ 
-                    pageSize: 50,
-                    showSizeChanger: true,
-                    showTotal: (total) => `Total ${total} test cases`
-                  }}
-                  size="small"
-                  columns={[
-                    {
-                      title: '#',
-                      dataIndex: 'id',
-                      key: 'id',
-                      width: 80,
-                      align: 'center',
-                      render: (id) => id || '-',
-                    },
-                    {
-                      title: 'Name',
-                      dataIndex: 'text',
-                      key: 'text',
-                      render: (text, record) => {
-                        // Usar text si existe, sino name, sino un mensaje por defecto
-                        const fullText = text || record.name || 'Test Case without name'
-                        return <Text style={{ fontSize: '13px' }}>{fullText}</Text>
-                      },
-                      ellipsis: {
-                        showTitle: true,
-                      },
-                    },
-                  ]}
-                />
+                (() => {
+                  // Get issues for current run (use runInfo.run which is sorted correctly)
+                  const currentRun = runInfo?.run || selectedRun
+                  const testsWithIssues = currentRun ? getTestsWithIssues(currentRun, script.tests) : []
+                  const issueMap = {}
+                  testsWithIssues.forEach(issue => {
+                    issueMap[String(issue.id)] = issue.status
+                  })
+                  
+                  // Filter tests based on selection
+                  let filteredTests = script.tests.map((test, index) => ({
+                    ...test,
+                    key: test.id || index,
+                    _index: index + 1,
+                    _issueStatus: issueMap[String(test.id)] || null
+                  }))
+                  
+                  if (testFilter === 'failed') {
+                    filteredTests = filteredTests.filter(t => t._issueStatus === 'fail')
+                  } else if (testFilter === 'blocked') {
+                    filteredTests = filteredTests.filter(t => t._issueStatus === 'block')
+                  } else if (testFilter === 'issues') {
+                    filteredTests = filteredTests.filter(t => t._issueStatus)
+                  }
+                  
+                  return (
+                    <Table
+                      dataSource={filteredTests}
+                      pagination={{ 
+                        pageSize: 50,
+                        showSizeChanger: true,
+                        showTotal: (total, range) => testFilter !== 'all' 
+                          ? `Showing ${total} ${testFilter === 'issues' ? 'tests with issues' : testFilter} tests`
+                          : `Total ${total} test cases`
+                      }}
+                      size="small"
+                      rowClassName={(record) => {
+                        if (record._issueStatus === 'fail') return 'row-failed'
+                        if (record._issueStatus === 'block') return 'row-blocked'
+                        return ''
+                      }}
+                      columns={[
+                        {
+                          title: '#',
+                          dataIndex: '_index',
+                          key: '_index',
+                          width: 70,
+                          align: 'center',
+                          render: (index, record) => (
+                            <Text 
+                              strong={!!record._issueStatus}
+                              style={{ 
+                                fontFamily: 'monospace',
+                                color: record._issueStatus === 'fail' ? '#ff4d4f' : record._issueStatus === 'block' ? '#faad14' : undefined
+                              }}
+                            >
+                              {String(index).padStart(4, '0')}
+                            </Text>
+                          ),
+                        },
+                        {
+                          title: 'Test Case',
+                          dataIndex: 'text',
+                          key: 'text',
+                          render: (text, record) => {
+                            const fullText = text || record.name || 'Test Case without name'
+                            return (
+                              <Text 
+                                strong={!!record._issueStatus}
+                                style={{ fontSize: '13px' }}
+                              >
+                                {fullText}
+                              </Text>
+                            )
+                          },
+                          ellipsis: {
+                            showTitle: true,
+                          },
+                        },
+                        {
+                          title: 'Status',
+                          key: 'status',
+                          width: 100,
+                          align: 'center',
+                          render: (_, record) => {
+                            if (record._issueStatus === 'fail') {
+                              return (
+                                <Tag color="red" style={{ margin: 0 }}>
+                                  <CloseCircleOutlined /> FAIL
+                                </Tag>
+                              )
+                            }
+                            if (record._issueStatus === 'block') {
+                              return (
+                                <Tag color="orange" style={{ margin: 0 }}>
+                                  <ExclamationCircleOutlined /> BLOCK
+                                </Tag>
+                              )
+                            }
+                            // Check if test passed based on results
+                            if (currentRun?.results) {
+                              const result = currentRun.results[String(record.id)]
+                              const status = result?.result || result
+                              if (status === 'pass' || status === 'passed') {
+                                return <Tag color="green" style={{ margin: 0 }}>✓ PASS</Tag>
+                              }
+                            }
+                            return <Tag style={{ margin: 0 }}>-</Tag>
+                          },
+                        },
+                      ]}
+                    />
+                  )
+                })()
               ) : (
                 <Text type="secondary">No test cases found in this test suite.</Text>
               )}
             </Card>
+
+            {/* CSS for row highlighting */}
+            <style>{`
+              .row-failed {
+                background-color: #fff1f0 !important;
+              }
+              .row-failed:hover > td {
+                background-color: #ffccc7 !important;
+              }
+              .row-blocked {
+                background-color: #fff7e6 !important;
+              }
+              .row-blocked:hover > td {
+                background-color: #ffe58f !important;
+              }
+            `}</style>
           </div>
         ) : (
           <Text type="secondary">No test suite data available.</Text>

@@ -44,6 +44,34 @@ function getInitials(email) {
   return email.substring(0, 2).toUpperCase()
 }
 
+// Get tests with issues (failed or blocked) from a run
+function getTestsWithIssues(run) {
+  const issues = []
+  if (!run.results || !run.tests) return issues
+  
+  Object.entries(run.results).forEach(([testId, result]) => {
+    const status = result?.result || result
+    if (status === 'fail' || status === 'block' || status === 'failed' || status === 'blocked') {
+      // Find the test by ID
+      const test = run.tests.find(t => String(t.id) === String(testId))
+      const testIndex = run.tests.findIndex(t => String(t.id) === String(testId))
+      
+      if (test) {
+        issues.push({
+          id: testId,
+          number: testIndex + 1, // 1-based index for display
+          text: test.text || test.name || 'Unknown test',
+          status: status === 'fail' || status === 'failed' ? 'fail' : 'block'
+        })
+      }
+    }
+  })
+  
+  // Sort by test number
+  issues.sort((a, b) => a.number - b.number)
+  return issues
+}
+
 function Dashboard() {
   const navigate = useNavigate()
   const [selectedProject, setSelectedProject] = useState(null)
@@ -62,6 +90,8 @@ function Dashboard() {
   const [viewMode, setViewMode] = useState('grid')
   // Track which scripts are expanded in horizontal view (scriptId -> boolean)
   const [expandedScripts, setExpandedScripts] = useState({})
+  // Track which cards have expanded issues panel (scriptId -> boolean)
+  const [expandedIssues, setExpandedIssues] = useState({})
   // Progressive loading: store runs as they load
   const [progressiveRuns, setProgressiveRuns] = useState([])
   const [isLoadingProgressive, setIsLoadingProgressive] = useState(false)
@@ -1430,29 +1460,33 @@ function Dashboard() {
                         const isSelected = selectedRun?.script?.id === scriptId
                         const isActive = runState === 'started'
                         const hasIssues = failed > 0 || blocked > 0
+                        const totalIssues = failed + blocked
+                        const issuesExpanded = expandedIssues[scriptId] || false
+                        const testsWithIssues = hasIssues ? getTestsWithIssues(run) : []
 
                         // Create unique key for script (one card per script)
                         const uniqueKey = `${run.project?.id || 'p'}-${scriptId}`
 
                         return (
                           <Col key={uniqueKey} xs={24} sm={12} lg={8}>
-                            <Card
-                              hoverable
-                              onClick={() => setSelectedRun(run)}
-                              style={{
-                                height: '100%',
-                                border: isSelected ? '2px solid #1890ff' : '1px solid #d9d9d9',
-                                boxShadow: isSelected ? '0 2px 8px rgba(24, 144, 255, 0.2)' : 'none',
-                                animation: isActive ? 'pulse 2s infinite' : 'none',
-                              }}
-                            >
-                              {/* Badge for alerts */}
-                              {hasIssues && (
-                                <Badge.Ribbon 
-                                  text={failed > 0 ? 'Failures' : 'Blocks'} 
-                                  color={failed > 0 ? 'red' : 'orange'}
-                                />
-                              )}
+                            <div style={{ position: 'relative' }}>
+                              <Card
+                                hoverable
+                                onClick={() => setSelectedRun(run)}
+                                style={{
+                                  height: '100%',
+                                  border: isSelected ? '2px solid #1890ff' : hasIssues ? '1px solid #ff4d4f' : '1px solid #d9d9d9',
+                                  boxShadow: isSelected ? '0 2px 8px rgba(24, 144, 255, 0.2)' : 'none',
+                                  animation: isActive ? 'pulse 2s infinite' : 'none',
+                                }}
+                              >
+                                {/* Badge for alerts - show total issues count */}
+                                {hasIssues && (
+                                  <Badge.Ribbon 
+                                    text={`${totalIssues} Issue${totalIssues > 1 ? 's' : ''}`} 
+                                    color={failed > 0 ? 'red' : 'orange'}
+                                  />
+                                )}
 
                               {/* Header with user */}
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1557,13 +1591,185 @@ function Dashboard() {
                                 <Tag style={{ margin: 0, fontSize: '10px' }}>{total}</Tag>
                               </div>
 
-                              {/* Time */}
-                              <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                                <Text type="secondary" style={{ fontSize: '11px' }}>
-                                  ⏱️ {formatElapsedTime(run.created)}
-                                </Text>
-                              </div>
+                              {/* Time - only show if no issues, with extra height to match issues button */}
+                              {!hasIssues && (
+                                <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 12, paddingBottom: 12 }}>
+                                  <Text type="secondary" style={{ fontSize: '11px' }}>
+                                    ⏱️ {formatElapsedTime(run.created)}
+                                  </Text>
+                                </div>
+                              )}
+
+                              {/* Issues expand button */}
+                              {hasIssues && (
+                                <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                                  <Button
+                                    size="middle"
+                                    type={issuesExpanded ? 'primary' : 'default'}
+                                    danger={failed > 0}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setExpandedIssues(prev => ({
+                                        ...prev,
+                                        [scriptId]: !prev[scriptId]
+                                      }))
+                                    }}
+                                    style={{ 
+                                      width: '100%', 
+                                      fontSize: '13px',
+                                      fontWeight: 600,
+                                      height: 36,
+                                      overflow: 'hidden',
+                                      whiteSpace: 'nowrap',
+                                      textOverflow: 'ellipsis',
+                                    }}
+                                  >
+                                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                      <WarningOutlined />
+                                      <span>{totalIssues} Issue{totalIssues > 1 ? 's' : ''}</span>
+                                      <span style={{ opacity: 0.85 }}>
+                                        ({failed > 0 ? `${failed}F` : ''}{failed > 0 && blocked > 0 ? '/' : ''}{blocked > 0 ? `${blocked}B` : ''})
+                                      </span>
+                                      {issuesExpanded ? <UpOutlined /> : <DownOutlined />}
+                                    </span>
+                                  </Button>
+                                </div>
+                              )}
                             </Card>
+
+                            {/* Click-outside overlay to close panel */}
+                            {hasIssues && issuesExpanded && (
+                              <div 
+                                style={{
+                                  position: 'fixed',
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  zIndex: 99,
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setExpandedIssues(prev => ({ ...prev, [scriptId]: false }))
+                                }}
+                              />
+                            )}
+
+                            {/* Floating issues panel - always rendered for smooth animation */}
+                            {hasIssues && (
+                              <div 
+                                style={{
+                                  position: 'absolute',
+                                  top: '100%',
+                                  left: 0,
+                                  right: 0,
+                                  zIndex: 100,
+                                  background: 'white',
+                                  border: issuesExpanded ? '1px solid #ffccc7' : '1px solid transparent',
+                                  borderRadius: '0 0 8px 8px',
+                                  boxShadow: issuesExpanded ? '0 4px 12px rgba(0,0,0,0.15)' : 'none',
+                                  marginTop: -1,
+                                  maxHeight: issuesExpanded ? 250 : 0,
+                                  opacity: issuesExpanded ? 1 : 0,
+                                  overflow: 'hidden',
+                                  transition: 'max-height 0.25s ease-out, opacity 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out',
+                                  pointerEvents: issuesExpanded ? 'auto' : 'none'
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {/* Header with summary */}
+                                <div style={{ 
+                                  padding: '8px 12px', 
+                                  background: failed > 0 ? '#fff1f0' : '#fff7e6',
+                                  borderBottom: '1px solid #f0f0f0',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center'
+                                }}>
+                                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                                    {failed > 0 && (
+                                      <Text style={{ fontSize: '11px', color: '#ff4d4f' }}>
+                                        <span style={{ 
+                                          display: 'inline-block', 
+                                          width: 8, 
+                                          height: 8, 
+                                          borderRadius: '50%', 
+                                          background: '#ff4d4f',
+                                          marginRight: 4
+                                        }}></span>
+                                        {failed} Failed
+                                      </Text>
+                                    )}
+                                    {blocked > 0 && (
+                                      <Text style={{ fontSize: '11px', color: '#faad14' }}>
+                                        <span style={{ 
+                                          display: 'inline-block', 
+                                          width: 8, 
+                                          height: 8, 
+                                          borderRadius: '50%', 
+                                          background: '#faad14',
+                                          marginRight: 4
+                                        }}></span>
+                                        {blocked} Blocked
+                                      </Text>
+                                    )}
+                                  </div>
+                                  <Button 
+                                    type="link" 
+                                    size="small" 
+                                    style={{ fontSize: '11px', padding: 0 }}
+                                    onClick={() => {
+                                      setSelectedRun(run)
+                                      setExpandedIssues(prev => ({ ...prev, [scriptId]: false }))
+                                    }}
+                                  >
+                                    See all in panel →
+                                  </Button>
+                                </div>
+
+                                {/* Issues list - show max 4 preview */}
+                                <div style={{ padding: '8px 12px', maxHeight: 180, overflowY: 'auto' }}>
+                                  {testsWithIssues.slice(0, 4).map((issue) => (
+                                    <div 
+                                      key={issue.id}
+                                      style={{
+                                        padding: '6px 8px',
+                                        marginBottom: 6,
+                                        background: issue.status === 'fail' ? '#fff1f0' : '#fff7e6',
+                                        borderRadius: 4,
+                                        borderLeft: `3px solid ${issue.status === 'fail' ? '#ff4d4f' : '#faad14'}`,
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: 8
+                                      }}
+                                    >
+                                      <Tag 
+                                        color={issue.status === 'fail' ? 'red' : 'orange'} 
+                                        style={{ margin: 0, fontSize: '10px', flexShrink: 0 }}
+                                      >
+                                        #{issue.number}
+                                      </Tag>
+                                      <Text style={{ fontSize: '11px', lineHeight: 1.4 }}>
+                                        {issue.text.length > 80 ? issue.text.substring(0, 80) + '...' : issue.text}
+                                      </Text>
+                                    </div>
+                                  ))}
+                                  {testsWithIssues.length > 4 && (
+                                    <div style={{ 
+                                      textAlign: 'center', 
+                                      padding: '8px',
+                                      borderTop: '1px dashed #f0f0f0',
+                                      marginTop: 4
+                                    }}>
+                                      <Text type="secondary" style={{ fontSize: '11px' }}>
+                                        +{testsWithIssues.length - 4} more issue{testsWithIssues.length - 4 > 1 ? 's' : ''}
+                                      </Text>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            </div>
                           </Col>
                         )
                       })}
@@ -1763,6 +1969,105 @@ function Dashboard() {
                           Query: <Text strong>0</Text>{' '}
                           Total: <Text strong>{selectedRun.progress.pass || 0}/{selectedRun.progress.total || 0}</Text>
                         </Text>
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* Tests with Issues - NEW SECTION */}
+                  {selectedRun.progress && (selectedRun.progress.fail > 0 || selectedRun.progress.block > 0) && (
+                    <Card 
+                      size="small" 
+                      style={{ 
+                        marginBottom: 16,
+                        background: selectedRun.progress.fail > 0 ? '#fff1f0' : '#fff7e6',
+                        border: `1px solid ${selectedRun.progress.fail > 0 ? '#ffccc7' : '#ffe58f'}`
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <Text strong style={{ fontSize: '13px', color: selectedRun.progress.fail > 0 ? '#ff4d4f' : '#d48806' }}>
+                          ⚠️ Tests with Issues ({(selectedRun.progress.fail || 0) + (selectedRun.progress.block || 0)})
+                        </Text>
+                      </div>
+
+                      {/* Summary badges */}
+                      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                        {selectedRun.progress.fail > 0 && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ 
+                              display: 'inline-block', 
+                              width: 10, 
+                              height: 10, 
+                              borderRadius: '50%', 
+                              background: '#ff4d4f'
+                            }}></span>
+                            <Text style={{ fontSize: '12px' }}>{selectedRun.progress.fail} Failed</Text>
+                          </div>
+                        )}
+                        {selectedRun.progress.block > 0 && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ 
+                              display: 'inline-block', 
+                              width: 10, 
+                              height: 10, 
+                              borderRadius: '50%', 
+                              background: '#faad14'
+                            }}></span>
+                            <Text style={{ fontSize: '12px' }}>{selectedRun.progress.block} Blocked</Text>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Issues list */}
+                      <div style={{ maxHeight: 250, overflowY: 'auto' }}>
+                        {getTestsWithIssues(selectedRun).map((issue) => (
+                          <div 
+                            key={issue.id}
+                            style={{
+                              padding: '8px 10px',
+                              marginBottom: 8,
+                              background: 'white',
+                              borderRadius: 6,
+                              borderLeft: `4px solid ${issue.status === 'fail' ? '#ff4d4f' : '#faad14'}`,
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: 10
+                            }}
+                          >
+                            <Tag 
+                              color={issue.status === 'fail' ? 'red' : 'orange'} 
+                              style={{ margin: 0, fontSize: '11px', flexShrink: 0 }}
+                            >
+                              #{issue.number} {issue.status === 'fail' ? 'FAIL' : 'BLOCK'}
+                            </Tag>
+                            <Text style={{ fontSize: '12px', lineHeight: 1.4 }}>
+                              {issue.text}
+                            </Text>
+                          </div>
+                        ))}
+                        {getTestsWithIssues(selectedRun).length === 0 && (
+                          <Text type="secondary" style={{ fontSize: '12px' }}>
+                            Unable to identify specific failed tests
+                          </Text>
+                        )}
+                      </div>
+
+                      {/* Link to details */}
+                      <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                        <Button 
+                          type="link" 
+                          size="small" 
+                          style={{ padding: 0, fontSize: '12px' }}
+                          onClick={() => navigate(`/test-suite/${selectedRun.script.id}`, {
+                            state: {
+                              project: selectedRun.project,
+                              folder: selectedRun.folder,
+                              runIndex: selectedRun.userInfo?.runNumber ? selectedRun.userInfo.runNumber - 1 : 0,
+                              highlightIssues: true
+                            }
+                          })}
+                        >
+                          View all tests with highlights →
+                        </Button>
                       </div>
                     </Card>
                   )}
