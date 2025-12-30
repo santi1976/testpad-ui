@@ -2,8 +2,9 @@ import React from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Layout, Typography, Card, Tag, Spin, Alert, Button, Table, Breadcrumb, Progress, Space, Avatar, Select } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { HomeOutlined, UserOutlined, WarningOutlined, CloseCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
+import { HomeOutlined, UserOutlined, WarningOutlined, CloseCircleOutlined, ExclamationCircleOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { apiGet } from '../utils/api'
+import { hasEmailSent } from '../utils/emailTracking'
 import Navbar from '../components/Navbar'
 
 const { Content } = Layout
@@ -325,14 +326,32 @@ function TestSuiteDetails() {
                         {runInfo.userInfo.date}
                       </Text>
                     )}
-                    {runInfo.state && (
-                      <Tag 
-                        color={runInfo.state === 'started' ? 'processing' : runInfo.state === 'completed' ? 'success' : 'default'}
-                        style={{ fontSize: '11px', margin: 0 }}
-                      >
-                        {runInfo.state}
-                      </Tag>
-                    )}
+                    {(() => {
+                      const emailWasSent = hasEmailSent(scriptId, runInfo.id)
+                      const isNew = runInfo.state === 'new'
+                      
+                      if (isNew && emailWasSent) {
+                        return (
+                          <Space direction="vertical" size={0}>
+                            <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: '11px', margin: 0 }}>
+                              Email Sent
+                            </Tag>
+                            <Tag color="default" style={{ fontSize: '9px', marginTop: 2 }}>
+                              Status: NEW
+                            </Tag>
+                          </Space>
+                        )
+                      }
+                      
+                      return runInfo.state ? (
+                        <Tag 
+                          color={runInfo.state === 'started' ? 'processing' : runInfo.state === 'completed' ? 'success' : 'default'}
+                          style={{ fontSize: '11px', margin: 0 }}
+                        >
+                          {runInfo.state}
+                        </Tag>
+                      ) : null
+                    })()}
                   </div>
                 </div>
               </div>

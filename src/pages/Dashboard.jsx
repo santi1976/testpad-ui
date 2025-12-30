@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout, Typography, Card, Tag, Spin, Alert, Progress, Avatar, Select, Space, Row, Col, Empty, Badge, Divider, List, Button } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { UserOutlined, CheckCircleOutlined, CloseCircleOutlined, PauseCircleOutlined, ClockCircleOutlined, WarningOutlined, ArrowLeftOutlined, AppstoreOutlined, BarsOutlined, DownOutlined, UpOutlined, FilterOutlined, ClearOutlined } from '@ant-design/icons'
+import { UserOutlined, CheckCircleOutlined, CloseCircleOutlined, PauseCircleOutlined, ClockCircleOutlined, WarningOutlined, ArrowLeftOutlined, AppstoreOutlined, BarsOutlined, DownOutlined, UpOutlined, FilterOutlined, ClearOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import Navbar from '../components/Navbar'
 import { apiGet } from '../utils/api'
+import { hasEmailSent, getEmailRecipient } from '../utils/emailTracking'
 
 const { Content, Sider } = Layout
 const { Title, Text } = Typography
@@ -911,31 +912,90 @@ function Dashboard() {
 
           {/* Alertas críticas */}
           {criticalRuns.length > 0 && !isCriticalAlertsClosed && (
-            <Alert
-              message={`${criticalRuns.length} run(s) with critical issues`}
-              description={
-                <Space wrap>
-                  {criticalRuns.slice(0, 3).map((run, index) => {
-                    const uniqueKey = `${run.project?.id || 'p'}-${run.script?.id || 's'}-${run.id || index}`
-                    const displayName = run.userInfo?.isGuest && run.userInfo?.email && run.userInfo.email !== 'guest' && run.userInfo.email.includes('@')
-                      ? `Guest (${run.userInfo.email.split('@')[0]})`
-                      : run.userInfo?.email?.split('@')[0] || 'Unknown'
-                    return (
-                      <Text key={uniqueKey} style={{ fontSize: '12px' }}>
-                        {displayName} - {run.script.name}
+            <div
+              style={{
+                marginBottom: 12,
+                padding: '8px 12px',
+                background: 'linear-gradient(135deg, #fffbe6 0%, #fff7e6 100%)',
+                border: '1px solid #faad14',
+                borderRadius: '6px',
+                boxShadow: '0 2px 6px rgba(250, 173, 20, 0.12)'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <WarningOutlined style={{ fontSize: 14, color: '#faad14' }} />
+                  <Text strong style={{ fontSize: '13px', color: '#d46b08' }}>
+                    {criticalRuns.length} run{criticalRuns.length > 1 ? 's' : ''} with critical issues
+                  </Text>
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0, height: 'auto', fontSize: '11px', color: '#1890ff' }}
+                    onClick={() => {
+                      setSelectedState('blocked')
+                      setIsCriticalAlertsClosed(true)
+                    }}
+                  >
+                    Filter →
+                  </Button>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CloseCircleOutlined />}
+                    onClick={() => setIsCriticalAlertsClosed(true)}
+                    style={{ padding: 0, width: 16, height: 16, color: '#8c8c8c', fontSize: '12px' }}
+                  />
+                </div>
+              </div>
+              
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
+                {criticalRuns.map((run, index) => {
+                  const uniqueKey = `${run.project?.id || 'p'}-${run.script?.id || 's'}-${run.id || index}`
+                  const displayName = run.userInfo?.isGuest && run.userInfo?.email && run.userInfo.email !== 'guest' && run.userInfo.email.includes('@')
+                    ? `Guest (${run.userInfo.email.split('@')[0]})`
+                    : run.userInfo?.email?.split('@')[0] || 'Unknown'
+                  
+                  return (
+                    <div
+                      key={uniqueKey}
+                      onClick={() => {
+                        setSelectedRun(run)
+                        setIsCriticalAlertsClosed(true)
+                      }}
+                      style={{
+                        padding: '4px 8px',
+                        background: '#fff',
+                        border: '1px solid #ffe58f',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#fffbe6'
+                        e.currentTarget.style.borderColor = '#ffd666'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#fff'
+                        e.currentTarget.style.borderColor = '#ffe58f'
+                      }}
+                    >
+                      <Text style={{ fontSize: '12px', fontWeight: 500, color: '#262626' }}>
+                        {displayName}
                       </Text>
-                    )
-                  })}
-                  {criticalRuns.length > 3 && <Text style={{ fontSize: '12px' }}>and {criticalRuns.length - 3} more...</Text>}
-                </Space>
-              }
-              type="warning"
-              icon={<WarningOutlined />}
-              showIcon
-              closable
-              onClose={() => setIsCriticalAlertsClosed(true)}
-              style={{ marginBottom: 24 }}
-            />
+                      <Text style={{ fontSize: '12px', color: '#595959' }}>
+                        - {run.script?.name || 'Unknown'}
+                      </Text>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           )}
 
           {/* Quick Filter: With Issues */}
@@ -1408,6 +1468,13 @@ function Dashboard() {
                                       </div>
                                       <div style={{ minWidth: 80, textAlign: 'right' }}>
                                         <Text>{runPass}/{runTotal} {runPercentage}%</Text>
+                                        {runState === 'new' && hasEmailSent(run.script?.id, run.id) && (
+                                          <div style={{ marginTop: 4 }}>
+                                            <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: '9px' }}>
+                                              Email Sent
+                                            </Tag>
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                   )
@@ -1510,9 +1577,35 @@ function Dashboard() {
                                     </Text>
                                   </div>
                                 </div>
-                                <Tag color={getStateColor(run)} icon={getStateIcon(run)} style={{ fontSize: '11px' }}>
-                                  {run.state || 'unknown'}
-                                </Tag>
+                                {(() => {
+                                  const emailWasSent = hasEmailSent(run.script.id, run.id)
+                                  const isNew = run.state === 'new' || runState === 'new'
+                                  
+                                  if (isNew && emailWasSent) {
+                                    const emailRecipient = getEmailRecipient(run.script.id, run.id)
+                                    return (
+                                      <Space direction="vertical" size={0} align="end">
+                                        <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: '11px' }}>
+                                          Email Sent
+                                        </Tag>
+                                        {emailRecipient && (
+                                          <Text type="secondary" style={{ fontSize: '10px', display: 'block', marginTop: 2 }}>
+                                            To: {emailRecipient.split('@')[0]}
+                                          </Text>
+                                        )}
+                                        <Tag color="orange" style={{ fontSize: '9px', marginTop: 2 }}>
+                                          Status: NEW
+                                        </Tag>
+                                      </Space>
+                                    )
+                                  }
+                                  
+                                  return (
+                                    <Tag color={getStateColor(run)} icon={getStateIcon(run)} style={{ fontSize: '11px' }}>
+                                      {run.state || 'unknown'}
+                                    </Tag>
+                                  )
+                                })()}
                               </div>
 
                               {/* Test Suite with Run Selector */}

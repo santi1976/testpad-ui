@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons'
 import { apiGet } from '../utils/api'
 import { assignAndSendEmail } from '../api/assignAndSendEmail'
+import { markEmailSent, hasEmailSent, getEmailRecipient } from '../utils/emailTracking'
 import Navbar from '../components/Navbar'
 
 const { Content } = Layout
@@ -300,10 +301,12 @@ function CreateAndAssign({ embedded = false }) {
     
     try {
       await assignAndSendEmail(scriptId, runId, testerEmail, scriptName)
+      // Mark email as sent in localStorage with recipient
+      markEmailSent(scriptId, runId, testerEmail)
       setRunAssignments(prev => ({ ...prev, [runId]: testerEmail }))
       setPendingAssignments(prev => { const u = { ...prev }; delete u[runId]; return u })
       setCreatedRuns(prevRuns => 
-        prevRuns.map(r => (r.id || r._id) === runId ? { ...r, assignedTo: testerEmail } : r)
+        prevRuns.map(r => (r.id || r._id) === runId ? { ...r, assignedTo: testerEmail, emailSent: true } : r)
       )
       message.success(`Invitation sent to ${testerEmail}`)
     } catch (error) {
@@ -335,9 +338,11 @@ function CreateAndAssign({ embedded = false }) {
       const runId = run.id || run._id
       try {
         await assignAndSendEmail(run.scriptId, runId, quickAssignTester, run.scriptName)
+        // Mark email as sent in localStorage with recipient
+        markEmailSent(run.scriptId, runId, quickAssignTester)
         setRunAssignments(prev => ({ ...prev, [runId]: quickAssignTester }))
         setCreatedRuns(prevRuns => 
-          prevRuns.map(r => (r.id || r._id) === runId ? { ...r, assignedTo: quickAssignTester } : r)
+          prevRuns.map(r => (r.id || r._id) === runId ? { ...r, assignedTo: quickAssignTester, emailSent: true } : r)
         )
         successCount++
       } catch (error) {}
@@ -389,10 +394,27 @@ function CreateAndAssign({ embedded = false }) {
     {
       title: 'Status',
       key: 'status',
-      width: 100,
+      width: 120,
       render: (_, record) => {
         const runId = record.id || record._id
         const isAssigned = runAssignments[runId] || record.assignedTo
+        const emailWasSent = record.emailSent || hasEmailSent(record.scriptId, runId)
+        const emailRecipient = emailWasSent ? getEmailRecipient(record.scriptId, runId) : null
+        
+        if (emailWasSent) {
+          return (
+            <Space direction="vertical" size={0}>
+              <Tag color="green" icon={<CheckOutlined />}>Email Sent</Tag>
+              {emailRecipient && (
+                <Text type="secondary" style={{ fontSize: '10px', display: 'block', marginTop: 2 }}>
+                  To: {emailRecipient.split('@')[0]}
+                </Text>
+              )}
+              <Tag color="default" style={{ fontSize: '10px', marginTop: 2 }}>Status: NEW</Tag>
+            </Space>
+          )
+        }
+        
         return isAssigned ? (
           <Tag color="green" icon={<CheckOutlined />}>Sent</Tag>
         ) : (

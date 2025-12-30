@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import { apiGet } from '../utils/api'
 import { assignAndSendEmail } from '../api/assignAndSendEmail'
+import { markEmailSent, hasEmailSent, getEmailRecipient } from '../utils/emailTracking'
 
 const { Content } = Layout
 const { Title, Text } = Typography
@@ -206,9 +207,9 @@ function AssignmentsAndEmail({ embedded = false }) {
     return Array.from(testerSet).sort()
   }, [allRuns, runAssignments])
 
-  // Filter runs
+  // Filter and sort runs
   const filteredRuns = useMemo(() => {
-    return allRuns.filter(run => {
+    const filtered = allRuns.filter(run => {
       // Filter by test suite
       if (selectedTestSuiteId !== 'all' && run.scriptId !== selectedTestSuiteId) {
         return false
@@ -218,6 +219,15 @@ function AssignmentsAndEmail({ embedded = false }) {
         return false
       }
       return true
+    })
+    
+    // Sort by Test Suite name (alphabetically), then by Run Number (descending)
+    return filtered.sort((a, b) => {
+      // First sort by Test Suite name
+      const suiteCompare = a.scriptName.localeCompare(b.scriptName)
+      if (suiteCompare !== 0) return suiteCompare
+      // If same Test Suite, sort by Run Number (descending - newest first)
+      return (b.runNumber || 0) - (a.runNumber || 0)
     })
   }, [allRuns, selectedTestSuiteId, stateFilter])
 
@@ -302,6 +312,8 @@ function AssignmentsAndEmail({ embedded = false }) {
       
       try {
         await assignAndSendEmail(run.scriptId, run.runId, testerEmail, run.scriptName)
+        // Mark email as sent in localStorage with recipient
+        markEmailSent(run.scriptId, run.runId, testerEmail)
         successCount++
         // Remove from selection after success
         setSelectedRunIds(prev => {
@@ -577,35 +589,66 @@ function AssignmentsAndEmail({ embedded = false }) {
                       <div style={{ fontSize: 12, color: '#888' }}>{run.projectName}</div>
                     </div>
                     <div>
-                      {run.state === 'new' && (
-                        <Tag color="orange">New</Tag>
-                      )}
-                      {run.state === 'started' && (
-                        <Tag color="blue" icon={<ClockCircleOutlined />}>Started</Tag>
-                      )}
-                      {run.state === 'completed' && (
-                        <Tag color="green" icon={<CheckCircleOutlined />}>Completed</Tag>
-                      )}
+                      {(() => {
+                        const emailWasSent = hasEmailSent(run.scriptId, run.runId)
+                        const emailRecipient = emailWasSent ? getEmailRecipient(run.scriptId, run.runId) : null
+                        
+                        if (run.state === 'new') {
+                          return emailWasSent ? (
+                            <Space direction="vertical" size={0}>
+                              <Tag color="green" icon={<CheckCircleOutlined />}>Email Sent</Tag>
+                              {emailRecipient && (
+                                <Text type="secondary" style={{ fontSize: '10px', display: 'block', marginTop: 2 }}>
+                                  To: {emailRecipient.split('@')[0]}
+                                </Text>
+                              )}
+                              <Tag color="orange" style={{ fontSize: '10px', marginTop: 2 }}>Status: NEW</Tag>
+                            </Space>
+                          ) : (
+                            <Tag color="orange">New</Tag>
+                          )
+                        }
+                        if (run.state === 'started') {
+                          return (
+                            <Tag color="blue" icon={<ClockCircleOutlined />}>Started</Tag>
+                          )
+                        }
+                        if (run.state === 'completed') {
+                          return (
+                            <Tag color="green" icon={<CheckCircleOutlined />}>Completed</Tag>
+                          )
+                        }
+                        return null
+                      })()}
                     </div>
                     <div>
                       {isNew ? (
-                        <Select
-                          style={{ width: '100%' }}
-                          placeholder="Select tester..."
-                          value={assignedTester || undefined}
-                          onChange={(value) => setRunTester(run.id, value)}
-                          allowClear
-                          showSearch
-                          filterOption={(input, option) =>
-                            option.children.toLowerCase().includes(input.toLowerCase())
-                          }
-                          loading={isSending}
-                          disabled={isSending}
-                        >
-                          {allTesters.map(t => (
-                            <Option key={t} value={t}>{t}</Option>
-                          ))}
-                        </Select>
+                        (() => {
+                          const emailWasSent = hasEmailSent(run.scriptId, run.runId)
+                          const emailRecipient = emailWasSent ? getEmailRecipient(run.scriptId, run.runId) : null
+                          // If email was sent, show the recipient as the default value (but allow changing it)
+                          const defaultValue = assignedTester || emailRecipient || undefined
+                          
+                          return (
+                            <Select
+                              style={{ width: '100%' }}
+                              placeholder="Select tester..."
+                              value={defaultValue}
+                              onChange={(value) => setRunTester(run.id, value)}
+                              allowClear
+                              showSearch
+                              filterOption={(input, option) =>
+                                option.children.toLowerCase().includes(input.toLowerCase())
+                              }
+                              loading={isSending}
+                              disabled={isSending}
+                            >
+                              {allTesters.map(t => (
+                                <Option key={t} value={t}>{t}</Option>
+                              ))}
+                            </Select>
+                          )
+                        })()
                       ) : (
                         <Tooltip title={run.state === 'started' ? 'Already started' : 'Already completed'}>
                           <Select

@@ -57,8 +57,6 @@ function httpsRequest(options, body = null) {
 }
 
 async function loginToTestpad() {
-  console.log('[Server] Logging in to Testpad...')
-  
   // Step 1: Get login page
   const loginPage = await httpsRequest({
     hostname: 'app.testpad.com',
@@ -153,7 +151,6 @@ async function loginToTestpad() {
     lastLogin: Date.now()
   }
 
-  console.log('[Server] ✅ Login successful')
   return sessionData
 }
 
@@ -208,11 +205,9 @@ async function startServer() {
           res.status(401).json({ valid: false, error: 'Invalid API token' })
         }
       } catch (apiError) {
-        console.error('[Server] Error validating API token:', apiError.message)
         res.status(401).json({ valid: false, error: 'Invalid API token' })
       }
     } catch (error) {
-      console.error('[Server] Error validating login:', error.message)
       res.status(500).json({ error: error.message })
     }
   })
@@ -227,8 +222,6 @@ async function startServer() {
         return res.status(400).json({ error: 'Missing required fields' })
       }
 
-      console.log(`[Server] Assign & Send: script=${scriptId}, run=${runId}, email=${targetEmail}`)
-      
       const { cookies, csrfToken } = await ensureLoggedIn()
 
       // Generate ObjectId
@@ -290,11 +283,8 @@ async function startServer() {
       }, setmetaBody)
 
       if (setmetaResponse.status >= 400) {
-        console.error('[Server] setmeta failed:', setmetaResponse.status, setmetaResponse.data)
         return res.status(setmetaResponse.status).json({ error: 'Failed to assign run', details: setmetaResponse.data })
       }
-
-      console.log('[Server] ✅ Run assigned')
 
       // Step 2: sendemail
       const senderEmail = USERNAME
@@ -330,15 +320,11 @@ async function startServer() {
       }, sendemailBody)
 
       if (sendemailResponse.status >= 400) {
-        console.error('[Server] sendemail failed:', sendemailResponse.status, sendemailResponse.data)
         return res.status(sendemailResponse.status).json({ error: 'Failed to send email', details: sendemailResponse.data })
       }
 
-      console.log('[Server] ✅ Email sent')
-      
       res.json({ success: true, message: `Run assigned and email sent to ${targetEmail}` })
     } catch (error) {
-      console.error('[Server] Error:', error.message)
       res.status(500).json({ error: error.message })
     }
   })
@@ -380,7 +366,6 @@ async function startServer() {
         res.send(proxyResponse.data)
       }
     } catch (error) {
-      console.error('[API Proxy] Error:', error.message)
       res.status(500).json({ error: error.message })
     }
   })
@@ -395,10 +380,7 @@ async function startServer() {
   app.use(vite.middlewares)
 
   app.listen(PORT, () => {
-    console.log(`\n🚀 Server running at http://localhost:${PORT}`)
-    console.log('   - Frontend: Vite dev server')
-    console.log('   - Backend: /api/assign-and-send')
-    console.log('')
+    // Server started
   })
 }
 
