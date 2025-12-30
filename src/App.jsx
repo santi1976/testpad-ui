@@ -224,23 +224,22 @@ function App() {
 
   return (
     <Layout style={{ minHeight: '100vh', margin: 0, padding: 0 }}>
-      <Layout style={{ flexDirection: 'row', margin: 0, padding: 0 }}>
-        <Sider 
-          width={280} 
-          style={{ 
-            background: '#f5f7fa', 
-            borderRight: '1px solid #e5e7eb',
-            margin: 0,
-            padding: 0,
-          }}
-        >
+      {/* Header row with PROJECTS title and Navbar */}
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'row', 
+        margin: 0, 
+        padding: 0,
+        height: 56,
+        width: '100%',
+      }}>
         <div style={{ 
+          width: 280,
           padding: '0 20px', 
           fontWeight: 700, 
           fontSize: 14,
           letterSpacing: '1.5px',
-          borderBottom: '1px solid #e5e7eb', 
-          background: '#1890ff',
+          background: 'linear-gradient(135deg, #475569 0%, #334155 100%)',
           color: '#fff',
           textTransform: 'uppercase',
           height: 56,
@@ -248,9 +247,35 @@ function App() {
           alignItems: 'center',
           justifyContent: 'center',
           boxSizing: 'border-box',
+          margin: 0,
+          flexShrink: 0,
+          borderBottom: '1px solid #64748b',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         }}>
           PROJECTS
         </div>
+        <div style={{ flex: 1, height: 56, margin: 0, padding: 0 }}>
+          <Navbar />
+        </div>
+      </div>
+      
+      <Layout style={{ flexDirection: 'row', margin: 0, padding: 0 }}>
+        <Sider 
+          width={280} 
+          style={{ 
+            // Light mode - Warm, inviting background
+            background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%)', 
+            borderRight: '1px solid #cbd5e1',
+            margin: 0,
+            padding: 0,
+            overflow: 'hidden',
+            boxShadow: '2px 0 12px rgba(0,0,0,0.08)',
+            // Dark mode (for future implementation):
+            // background: '#0f1419', 
+            // borderRight: '1px solid #1a1f35',
+            // boxShadow: '2px 0 8px rgba(0,0,0,0.15)',
+          }}
+        >
         {projectsLoading ? (
           <div style={{ padding: '24px', textAlign: 'center' }}>
             <Spin />
@@ -265,24 +290,84 @@ function App() {
             />
           </div>
         ) : (
-          <Menu
-            mode="inline"
-            selectedKeys={selectedKey ? [selectedKey] : []}
-            openKeys={expandedKeys}
-            onOpenChange={setExpandedKeys}
-            items={menuItems}
-            onSelect={handleMenuSelect}
-            style={{ 
-              borderRight: 0, 
-              background: '#f5f7fa',
-              padding: '12px 0',
-            }}
-          />
+          <div style={{ padding: '8px' }}>
+            {menuItems.map((item) => {
+              const isSelected = selectedKey === item.key
+              return (
+                <div
+                  key={item.key}
+                  onClick={() => handleMenuSelect({ key: item.key })}
+                  style={{
+                    margin: '6px 0',
+                    padding: '0 16px',
+                    height: 44,
+                    display: 'flex',
+                    alignItems: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    // Light mode - Clear contrast for inactive buttons
+                    background: isSelected 
+                      ? 'linear-gradient(135deg, #1890ff 0%, #096dd9 100%)' 
+                      : '#e2e8f0',
+                    borderRadius: '10px',
+                    border: isSelected 
+                      ? '1px solid rgba(24, 144, 255, 0.3)' 
+                      : '1px solid #94a3b8',
+                    boxShadow: isSelected 
+                      ? '0 4px 12px rgba(24, 144, 255, 0.3), 0 2px 4px rgba(24, 144, 255, 0.2)' 
+                      : '0 2px 4px rgba(0,0,0,0.1)',
+                    color: isSelected ? '#fff' : '#1e293b',
+                    fontWeight: isSelected ? 600 : 500,
+                    fontSize: '14px',
+                    // Dark mode (for future implementation):
+                    // background: isSelected 
+                    //   ? 'linear-gradient(135deg, #1890ff 0%, #096dd9 100%)' 
+                    //   : 'rgba(255, 255, 255, 0.25)',
+                    // border: isSelected 
+                    //   ? '1px solid rgba(255,255,255,0.2)' 
+                    //   : '1px solid rgba(255,255,255,0.1)',
+                    // color: isSelected ? '#fff' : '#fff',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) {
+                      // Light mode - Darker on hover
+                      e.currentTarget.style.background = '#cbd5e1'
+                      e.currentTarget.style.borderColor = '#64748b'
+                      e.currentTarget.style.color = '#0f172a'
+                      // Dark mode: e.currentTarget.style.background = 'rgba(255, 255, 255, 0.35)'
+                      // Dark mode: e.currentTarget.style.color = '#fff'
+                      e.currentTarget.style.transform = 'translateX(4px)'
+                      e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)'
+                    } else {
+                      e.currentTarget.style.transform = 'translateX(2px)'
+                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(24, 144, 255, 0.4), 0 2px 6px rgba(24, 144, 255, 0.3)'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) {
+                      // Light mode - Return to darker inactive state (visible contrast)
+                      e.currentTarget.style.background = '#e2e8f0'
+                      e.currentTarget.style.borderColor = '#94a3b8'
+                      e.currentTarget.style.color = '#1e293b'
+                      // Dark mode: e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)'
+                      // Dark mode: e.currentTarget.style.color = '#fff'
+                      e.currentTarget.style.transform = 'translateX(0)'
+                      e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)'
+                    } else {
+                      e.currentTarget.style.transform = 'translateX(0)'
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(24, 144, 255, 0.3), 0 2px 4px rgba(24, 144, 255, 0.2)'
+                    }
+                  }}
+                >
+                  {item.label}
+                </div>
+              )
+            })}
+          </div>
         )}
         </Sider>
 
-        <Layout style={{ flex: 1 }}>
-          <Navbar />
+        <Layout style={{ flex: 1, margin: 0, padding: 0 }}>
           <Content style={{ padding: '32px', background: '#fafafa', overflow: 'auto' }}>
           {!selectedKey || !selectedProject ? (
             <div style={{ 

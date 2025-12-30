@@ -29,6 +29,9 @@ export default function Navbar() {
         alignItems: 'center',
         height: 56,
         margin: 0,
+        paddingTop: 0,
+        paddingBottom: 0,
+        lineHeight: '56px',
         boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
       }}
     >
