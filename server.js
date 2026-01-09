@@ -6,8 +6,14 @@ import express from 'express'
 import https from 'https'
 import { createServer as createViteServer } from 'vite'
 import dotenv from 'dotenv'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
 
 dotenv.config()
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+const isProduction = process.env.NODE_ENV === 'production'
 
 const PORT = process.env.PORT || 5173
 const USERNAME = process.env.USER_TESTPAD
@@ -370,14 +376,26 @@ async function startServer() {
     }
   })
 
-  // Create Vite server in middleware mode
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa'
-  })
-
-  // Use Vite's middleware
-  app.use(vite.middlewares)
+  // Serve static files in production, or use Vite dev server in development
+  if (isProduction) {
+    // Serve static files from dist directory
+    app.use(express.static(join(__dirname, 'dist')))
+    
+    // Handle SPA routing - serve index.html for all non-API routes
+    app.get('*', (req, res) => {
+      if (!req.path.startsWith('/api')) {
+        res.sendFile(join(__dirname, 'dist', 'index.html'))
+      }
+    })
+  } else {
+    // Create Vite server in middleware mode for development
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa'
+    })
+    // Use Vite's middleware
+    app.use(vite.middlewares)
+  }
 
   app.listen(PORT, () => {
     // Server started
