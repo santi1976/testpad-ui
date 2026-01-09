@@ -12,47 +12,10 @@ This project is a web interface for managing test runs in Testpad (Bitfinex), wi
 
 ## 🎯 Project Objective
 
-Create a modern web interface that allows efficient management of test runs in Testpad, automating tasks that normally require multiple steps in the original web interface.
-
+Create a web interface that allows efficient management of test runs in Testpad, assigning and sending emails (individual and batch)
 ---
 
-## 🏗️ Architecture
 
-### Hybrid Architecture: Frontend + Backend Proxy
-
-The project uses a hybrid architecture that combines:
-
-1. **Frontend (React)** - User interface
-2. **Backend Proxy (Node.js/Express)** - Authentication handling and complex operations
-3. **Testpad REST API** - Basic operations (create runs, read data)
-
-```
-┌─────────────┐
-│   Browser   │
-│  (React UI) │
-└──────┬──────┘
-       │
-       │ HTTP Requests
-       │
-┌──────▼──────────────────┐
-│   Backend (server.js)    │
-│  - Express Server        │
-│  - Programmatic Login    │
-│  - Session Management    │
-└──────┬───────────────────┘
-       │
-       ├─────────────────┬─────────────────┐
-       │                 │                 │
-┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼──────┐
-│ API REST    │  │ Web App     │  │ Web App     │
-│ (Token)     │  │ (Login)     │  │ (Login)     │
-│             │  │             │  │             │
-│ api.testpad │  │ app.testpad │  │ bitfinex.   │
-│ .com        │  │ .com        │  │ testpad.com │
-└─────────────┘  └─────────────┘  └─────────────┘
-```
-
----
 
 ## 🔑 Why Two Authentication Methods?
 
