@@ -18,8 +18,8 @@ const API_BASE = 'https://api.testpad.com'
 // CONFIGURATION - Complete the following values:
 // ============================================
 const CONFIG = {
-  projectName: 'Bitfinex',        // ENTER THE PROJECT NAME
-  folderName: 'Release v1.134',   // ENTER THE FOLDER NAME
+  projectName: 'Testpad Api Testing',        // ENTER THE PROJECT NAME
+  folderName: 'Release v1.135 (copy)',   // ENTER THE FOLDER NAME
   scriptName: 'Home Page'         // ENTER THE SCRIPT NAME
 }
 // The run number is generated automatically by the system

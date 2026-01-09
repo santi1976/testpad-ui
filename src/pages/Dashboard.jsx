@@ -112,14 +112,14 @@ function Dashboard() {
 
   const projects = projectsData?.projects || []
 
-  // Auto-select Bitfinex project by default (only once on initial load)
+  // Auto-select Testpad Api Testing project by default (only once on initial load)
   useEffect(() => {
     if (projects.length > 0 && !selectedProject && !hasManuallySelectedProject) {
-      const bitfinexProject = projects.find(p => 
-        p.name.toLowerCase().includes('bitfinex')
+      const testpadApiProject = projects.find(p => 
+        p.name.toLowerCase().includes('testpad api testing')
       )
-      if (bitfinexProject) {
-        setSelectedProject(bitfinexProject)
+      if (testpadApiProject) {
+        setSelectedProject(testpadApiProject)
       }
     }
   }, [projects.length]) // Only depend on projects.length, not the full object
@@ -390,9 +390,9 @@ function Dashboard() {
         return
       }
       
-      // Wait for auto-select to happen (Bitfinex project)
-      const hasBitfinex = projects.some(p => p.name.toLowerCase().includes('bitfinex'))
-      if (hasBitfinex && !selectedProject && !hasManuallySelectedProject) {
+      // Wait for auto-select to happen (Testpad Api Testing project)
+      const hasTestpadApi = projects.some(p => p.name.toLowerCase().includes('testpad api testing'))
+      if (hasTestpadApi && !selectedProject && !hasManuallySelectedProject) {
         return
       }
       

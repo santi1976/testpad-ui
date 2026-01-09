@@ -93,11 +93,11 @@ function CreateAndAssign({ embedded = false }) {
   })
   const projects = projectsData?.projects || []
 
-  // Auto-select Bitfinex project
+  // Auto-select Testpad Api Testing project
   useEffect(() => {
     if (projects.length > 0 && !selectedProject) {
-      const bitfinexProject = projects.find(p => p.name.toLowerCase().includes('bitfinex'))
-      if (bitfinexProject) setSelectedProject(bitfinexProject)
+      const testpadApiProject = projects.find(p => p.name.toLowerCase().includes('testpad api testing'))
+      if (testpadApiProject) setSelectedProject(testpadApiProject)
     }
   }, [projects, selectedProject])
 
