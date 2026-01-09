@@ -129,7 +129,7 @@ For detailed information about the project architecture, API limitations, and im
 
 ---
 
-## 📦 Reusable Code for Assignment & Email Sending
+## Reusable Code for Assignment & Email Sending
 
 The following files and code sections can be extracted and reused in other projects that need similar assignment and email functionality.
 
