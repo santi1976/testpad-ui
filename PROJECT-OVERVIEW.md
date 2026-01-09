@@ -463,11 +463,262 @@ Given these limitations, we made the following architectural decisions:
 | Feature | Works? | Notes |
 |---------|--------|-------|
 | Create runs | ✅ Yes | Fully functional |
-| Assign & send email | ✅ Yes | Works, but not tracked |
+| Assign & send email | ✅ Yes | Works, tracked locally |
 | View run progress | ✅ Yes | Real-time from API |
-| Track sent emails | ❌ No | API limitation |
+| Track sent emails | ✅ Yes | Local tracking via localStorage |
 | Sync with Testpad UI | ❌ No | No bidirectional sync |
 | Detect prior assignments | ❌ No | Only state is available |
+
+---
+
+## 📧 Email Tracking System
+
+### Overview
+
+Since the Testpad API does not expose email sent status, we implemented a **client-side tracking system** using `localStorage` to track which runs have had emails sent and to whom.
+
+### Implementation
+
+**File**: `src/utils/emailTracking.js`
+
+**Storage Format**:
+- **Storage Key**: `testpad_emails_sent`
+- **Data Structure**: Object mapping `scriptId-runId` to recipient email
+  ```javascript
+  {
+    "12345-678": "user@example.com",
+    "12345-679": "another@example.com"
+  }
+  ```
+
+**Key Functions**:
+- `markEmailSent(scriptId, runId, recipientEmail)` - Marks a run as sent and stores recipient
+- `hasEmailSent(scriptId, runId)` - Checks if email was sent for a specific run
+- `getEmailRecipient(scriptId, runId)` - Retrieves the recipient email for a sent run
+- `getEmailsSentRuns()` - Returns all tracked runs
+- `clearEmailSentTracking()` - Clears all tracking data
+
+### Migration Support
+
+The system includes automatic migration from an older array-based format to the current object-based format that stores recipient emails:
+
+```javascript
+// Old format (array): ["12345-678", "12345-679"]
+// New format (object): { "12345-678": "user@example.com", ... }
+```
+
+### Limitations
+
+1. **Client-Side Only**: Data is stored in browser's `localStorage`, so:
+   - It's per-browser/per-device (not shared across devices)
+   - It can be cleared by the user
+   - It doesn't persist across different browsers
+
+2. **No Server-Side Sync**: The tracking is not synchronized with Testpad's database, so:
+   - If a run is assigned/emailed from Testpad directly, our tracking won't know
+   - If the user clears browser data, tracking is lost
+   - Multiple users won't see each other's tracking
+
+3. **Reassignment Tracking**: When a run is reassigned to a different tester, the tracking is updated with the new recipient email, allowing visibility into who the email was last sent to.
+
+### Usage in UI
+
+The email tracking is used throughout the application to:
+- Display "Email Sent" status on run cards and tables
+- Show recipient information when available
+- Pre-fill assignment fields with previous recipients for reassignment
+- Prevent duplicate email sends (user decision based on displayed status)
+
+---
+
+## 👥 User Selection Logic
+
+### Overview
+
+Since Testpad's API doesn't provide endpoints to retrieve the list of users, we extract user emails from **existing test run executions**. This means only users who have executed at least one test run will appear in the assignment list.
+
+### Extraction Process
+
+**Location**: `src/pages/AssignmentsAndEmail.jsx` (lines `195-208`)
+
+The system extracts tester emails from multiple sources in the run data:
+
+1. **From Run Headers**:
+   ```javascript
+   run.headers?._tester  // Primary source
+   run.headers?.tester    // Fallback
+   ```
+
+2. **From Run Assignee**:
+   ```javascript
+   run.assignee?.email    // For guest runs
+   ```
+
+3. **From Run Labels** (legacy format):
+   ```javascript
+   // Label format: "number / email / date / status"
+   run.label.split(' / ')[1]  // Extract email from label
+   ```
+
+4. **From Run Field Data**:
+   ```javascript
+   run.fielddata[1]?.raw  // Guest email stored in fielddata
+   run.fields["1"]        // Alternative field format
+   ```
+
+### User List Generation
+
+```javascript
+// Get unique testers from all runs
+const allTesters = useMemo(() => {
+  const testerSet = new Set()
+  allRuns.forEach(run => {
+    if (run.tester && run.tester.includes('@')) {
+      testerSet.add(run.tester)
+    }
+  })
+  // Also include testers from current assignments (for reassignment)
+  Object.values(runAssignments).forEach(email => {
+    if (email && email.includes('@')) testerSet.add(email)
+  })
+  return Array.from(testerSet).sort()  // Alphabetically sorted
+}, [allRuns, runAssignments])
+```
+
+### Important Behavior
+
+1. **Only Executed Runs**: Users must have executed at least one test run to appear in the list
+2. **New Users**: Newly created Testpad users who haven't executed any tests won't appear until they complete their first test execution
+3. **Guest Testers**: Guest testers (identified by email in fielddata) are also included in the list
+4. **Deduplication**: The system uses a `Set` to ensure each email appears only once
+5. **Sorting**: The final list is sorted alphabetically for easy selection
+
+### Guest vs Registered User Detection
+
+The system distinguishes between guest testers and registered users:
+
+**Guest Detection** (multiple methods):
+- `run.headers._tester === 'guest'`
+- `run.assignee.id === '_guest'` or `run.assignee.id === '0'`
+- `run.assignee.name === 'guest'`
+
+**Registered User Detection**:
+- Email found in `run.headers._tester` (and not 'guest')
+- Email found in `run.assignee.email` (for registered users)
+
+---
+
+## 📦 Batch Assignment Implementation
+
+### Overview
+
+The batch assignment feature allows users to select multiple test runs and assign them to testers, then send invitation emails in batch. This is implemented in `src/pages/AssignmentsAndEmail.jsx`.
+
+### Key Components
+
+#### 1. Selection State Management
+
+```javascript
+// Track selected run IDs
+const [selectedRunIds, setSelectedRunIds] = useState(new Set())
+
+// Track assignments per run (runId -> email)
+const [runAssignments, setRunAssignments] = useState({})
+
+// Track bulk tester for applying to multiple runs
+const [bulkTester, setBulkTester] = useState(null)
+```
+
+#### 2. Selection Functions
+
+- `toggleRunSelection(runId)` - Toggle individual run selection
+- `selectAllNew()` - Select all runs with `state === 'new'`
+- `clearSelection()` - Clear all selections
+
+#### 3. Bulk Assignment
+
+**Function**: `applyBulkTester()` (lines `269-283`)
+
+Applies the same tester email to all selected runs:
+
+```javascript
+const applyBulkTester = () => {
+  if (!bulkTester) {
+    message.warning('Please select a tester first')
+    return
+  }
+  const newAssignments = { ...runAssignments }
+  selectedRunIds.forEach(runId => {
+    const run = allRuns.find(r => r.id === runId)
+    if (run && run.state === 'new') {
+      newAssignments[runId] = bulkTester
+    }
+  })
+  setRunAssignments(newAssignments)
+  message.success(`Applied ${bulkTester.split('@')[0]} to ${selectedRunIds.size} runs`)
+}
+```
+
+#### 4. Individual Assignment
+
+**Function**: `setRunTester(runId, email)` (lines `285-290`)
+
+Allows assigning a specific tester to a single run:
+
+```javascript
+const setRunTester = (runId, email) => {
+  setRunAssignments(prev => ({
+    ...prev,
+    [runId]: email
+  }))
+}
+```
+
+#### 5. Batch Email Sending
+
+**Function**: `handleSendEmails()` (lines `292-353`)
+
+Processes all selected runs that have a tester assigned:
+
+**Process Flow**:
+1. Filter runs: Selected + `state === 'new'` + Has assigned tester
+2. For each run:
+   - Mark as "sending" (show loading indicator)
+   - Call `assignAndSendEmail()` API
+   - Mark email as sent in localStorage
+   - Remove from selection on success
+   - Clear assignment from state
+3. Show success/error summary
+4. Refetch data to update UI
+
+**Error Handling**:
+- Continues processing even if individual emails fail
+- Tracks success and error counts separately
+- Shows summary message with counts
+- Logs errors to console for debugging
+
+**State Updates**:
+- Uses `sendingRunIds` Set to track which runs are currently being processed
+- Updates UI in real-time as each email is sent
+- Automatically removes successfully sent runs from selection
+
+### Sorting and Organization
+
+Runs are sorted for better usability:
+1. **Primary Sort**: By Test Suite name (alphabetically)
+2. **Secondary Sort**: By Run Number (descending - newest first)
+
+This ensures runs from the same test suite are grouped together, with the most recent runs appearing first.
+
+### UI Features
+
+- **Checkbox Selection**: Individual run selection with checkboxes
+- **Select All**: Quick action to select all `new` runs
+- **Bulk Tester Dropdown**: Apply same tester to all selected runs
+- **Individual Tester Dropdown**: Assign different testers per run
+- **Send Button**: Disabled until runs are selected and testers assigned
+- **Progress Indicators**: Shows which runs are currently being processed
+- **Status Display**: Shows "Email Sent" status with recipient information
 
 ---
 
@@ -517,4 +768,4 @@ For issues or questions:
 
 ---
 
-**Last updated:** December 2024
+**Last updated:** January 2025
