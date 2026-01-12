@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react'
-import { 
-  Layout, Typography, Card, Button, Select, Space, Tag, Avatar, 
+import {
+  Layout, Typography, Card, Button, Select, Space, Tag, Avatar,
   Spin, Alert, message, Empty, Row, Col, Checkbox, Tooltip, Divider
 } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { 
-  MailOutlined, WarningOutlined, CheckCircleOutlined, 
+import {
+  MailOutlined, WarningOutlined, CheckCircleOutlined,
   ClockCircleOutlined, SendOutlined, InfoCircleOutlined
 } from '@ant-design/icons'
 import { apiGet } from '../utils/api'
@@ -30,7 +30,7 @@ function getInitials(email) {
 function getRunState(run) {
   // Use state from API if available
   if (run.state) return run.state
-  
+
   // Fallback: calculate from progress
   if (run.progress) {
     const { pass = 0, fail = 0, block = 0, total = 0 } = run.progress
@@ -43,22 +43,23 @@ function getRunState(run) {
 
 function AssignmentsAndEmail({ embedded = false }) {
   const queryClient = useQueryClient()
-  
+
   // Filters
   const [selectedProject, setSelectedProject] = useState(null)
+  const [selectedReleaseId, setSelectedReleaseId] = useState('latest') // Default to latest release
   const [selectedTestSuiteId, setSelectedTestSuiteId] = useState('all')
   const [stateFilter, setStateFilter] = useState('new') // Default to 'new' (ready to assign)
-  
+
   // Batch assignment state
   const [selectedRunIds, setSelectedRunIds] = useState(new Set())
   const [runAssignments, setRunAssignments] = useState({}) // runId -> email
   const [bulkTester, setBulkTester] = useState(null)
-  
+
   // Loading states
   const [sendingEmails, setSendingEmails] = useState(false)
   const [sendingRunIds, setSendingRunIds] = useState(new Set())
 
-  // Load projects
+  // Load projects (for dropdown, but don't block on this)
   const { data: projectsData } = useQuery({
     queryKey: ['projects'],
     queryFn: () => apiGet('/api/v1/projects'),
@@ -66,119 +67,247 @@ function AssignmentsAndEmail({ embedded = false }) {
 
   const projects = projectsData?.projects || []
 
-  // Auto-select Testpad Api Testing project
+  // Auto-select Testpad Api Testing project (or use from loaded projects)
   useEffect(() => {
-    if (projects.length > 0 && selectedProject === null) {
-      const testpadApiProject = projects.find(p => 
-        p.name.toLowerCase().includes('testpad api testing')
-      )
-      if (testpadApiProject) {
-        setSelectedProject(testpadApiProject)
+    if (selectedProject === null) {
+      // Try to find from loaded projects
+      if (projects.length > 0) {
+        const testpadApiProject = projects.find(p =>
+          p.name.toLowerCase().includes('testpad api testing')
+        )
+        if (testpadApiProject) {
+          setSelectedProject(testpadApiProject)
+        }
       }
     }
-  }, [projects])
-
-  // Fetch all runs
-  const fetchAllRuns = useCallback(async () => {
-    if (projects.length === 0) return []
-    
-    const projectsToFetch = selectedProject ? [selectedProject] : projects
-    const allRuns = []
-    
-    const MAX_CONCURRENT_SCRIPTS = 15
-    const MAX_SCRIPTS_PER_PROJECT = Infinity
-
-    for (const project of projectsToFetch) {
-      try {
-        const foldersResponse = await apiGet(`/api/v1/projects/${project.id}/folders`)
-        const folders = foldersResponse?.folders || []
-
-        const getAllScripts = (items) => {
-          const scripts = []
-          for (const item of items) {
-            if (item.type === 'script') {
-              scripts.push(item)
-            } else if (item.type === 'folder' && item.contents) {
-              scripts.push(...getAllScripts(item.contents))
-            }
-          }
-          return scripts
-        }
-
-        const scripts = getAllScripts(folders).slice(0, MAX_SCRIPTS_PER_PROJECT)
-        
-        // Process scripts in batches
-        for (let i = 0; i < scripts.length; i += MAX_CONCURRENT_SCRIPTS) {
-          const batch = scripts.slice(i, i + MAX_CONCURRENT_SCRIPTS)
-          const results = await Promise.allSettled(
-            batch.map(async (script) => {
-              const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
-              return { script, scriptData }
-            })
-          )
-          
-          results.forEach((result) => {
-            if (result.status === 'fulfilled' && result.value) {
-              const { script, scriptData } = result.value
-              const scriptDetails = scriptData?.script || scriptData
-              
-              if (scriptDetails.runs && Array.isArray(scriptDetails.runs)) {
-                scriptDetails.runs.forEach(run => {
-                  const state = getRunState(run)
-                  
-                  // Get tester info
-                  let testerEmail = null
-                  const testerFromHeaders = run.headers?._tester
-                  const testerFromAssignee = run.assignee?.email
-                  
-                  if (testerFromHeaders && testerFromHeaders !== 'anyone' && testerFromHeaders !== 'guest') {
-                    testerEmail = testerFromHeaders
-                  } else if (testerFromAssignee && testerFromAssignee.includes('@')) {
-                    testerEmail = testerFromAssignee
-                  }
-                  
-                  // Create unique ID by combining scriptId and run.id
-                  // This ensures runs with the same number in different test suites are treated separately
-                  const uniqueId = `${script.id}-${run.id}`
-                  
-                  allRuns.push({
-                    id: uniqueId,
-                    runId: run.id, // Keep original run.id for API calls
-                    runNumber: run.headers?._run || run.id,
-                    state,
-                    tester: testerEmail,
-                    scriptId: script.id,
-                    scriptName: script.name,
-                    projectId: project.id,
-                    projectName: project.name,
-                    created: run.created || run.headers?._createdDate,
-                    progress: run.progress
-                  })
-                })
-              }
-            }
-          })
-        }
-      } catch (error) {
-        console.error(`Error fetching project ${project.id}:`, error)
-      }
-    }
-    
-    // Sort by run number descending (newest first)
-    return allRuns.sort((a, b) => (b.runNumber || 0) - (a.runNumber || 0))
   }, [projects, selectedProject])
 
+  // Known default project - start loading immediately without waiting for projects list
+  const DEFAULT_PROJECT_NAME = 'Testpad Api Testing'
+  
+  // Use selectedProject if set, otherwise create a temporary object for the default
+  // This allows folders query to start immediately
+  const activeProject = selectedProject || (projects.find(p => 
+    p.name.toLowerCase().includes('testpad api testing')
+  )) || null
+
+  // Fetch folders first to get releases (fast operation)
+  const { data: foldersData } = useQuery({
+    queryKey: ['projectFolders', activeProject?.id],
+    queryFn: async () => {
+      if (!activeProject) return { folders: [], releases: [] }
+      const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`)
+      const folders = response?.folders || []
+      
+      // Extract releases (top-level folders) sorted descending by name
+      const releases = folders
+        .filter(item => item.type === 'folder')
+        .map(folder => ({ id: folder.id, name: folder.name, contents: folder.contents }))
+        .sort((a, b) => b.name.localeCompare(a.name))
+      
+      return { folders, releases }
+    },
+    enabled: !!activeProject,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const folderReleases = foldersData?.releases || []
+  const allFolders = foldersData?.folders || []
+
+  // Fetch testers from ALL releases (historical data for dropdown)
+  const { data: historicalTestersData } = useQuery({
+    queryKey: ['historicalTesters', activeProject?.id],
+    queryFn: async () => {
+      if (!activeProject || folderReleases.length === 0) return []
+      
+      const testerSet = new Set()
+      
+      // Helper to get all scripts from folders
+      const getAllScripts = (items) => {
+        const scripts = []
+        for (const item of items) {
+          if (item.type === 'script') {
+            scripts.push(item)
+          } else if (item.type === 'folder' && item.contents) {
+            scripts.push(...getAllScripts(item.contents))
+          }
+        }
+        return scripts
+      }
+      
+      // Get all scripts from all folders
+      const allScripts = getAllScripts(allFolders)
+      
+      // Fetch scripts in batches to get tester info
+      const MAX_CONCURRENT = 20
+      for (let i = 0; i < allScripts.length; i += MAX_CONCURRENT) {
+        const batch = allScripts.slice(i, i + MAX_CONCURRENT)
+        const results = await Promise.allSettled(
+          batch.map(script => apiGet(`/api/v1/scripts/${script.id}`))
+        )
+        
+        results.forEach(result => {
+          if (result.status === 'fulfilled' && result.value) {
+            const scriptDetails = result.value?.script || result.value
+            if (scriptDetails.runs && Array.isArray(scriptDetails.runs)) {
+              scriptDetails.runs.forEach(run => {
+                // Extract tester email
+                const testerEmail = run.headers?._tester || run.assignee?.email
+                if (testerEmail && testerEmail.includes('@') && 
+                    testerEmail !== 'anyone' && testerEmail.toLowerCase() !== 'guest') {
+                  testerSet.add(testerEmail)
+                }
+              })
+            }
+          }
+        })
+      }
+      
+      return Array.from(testerSet).sort()
+    },
+    enabled: !!activeProject && folderReleases.length > 0 && allFolders.length > 0,
+    staleTime: 10 * 60 * 1000, // Cache for 10 minutes
+    gcTime: 30 * 60 * 1000,
+  })
+
+  const historicalTesters = historicalTestersData || []
+
+  // Determine which release to load based on selection
+  const releaseToLoad = useMemo(() => {
+    if (selectedReleaseId === 'latest' || selectedReleaseId === null) {
+      return folderReleases[0] || null // Latest release
+    }
+    if (selectedReleaseId === 'all') {
+      return 'all' // Load all releases
+    }
+    return folderReleases.find(r => r.id === selectedReleaseId) || null
+  }, [selectedReleaseId, folderReleases])
+
+  const fetchRunsForRelease = useCallback(async () => {
+    if (!activeProject || !releaseToLoad) return []
+
+    const allRuns = []
+    const MAX_CONCURRENT_SCRIPTS = 30
+
+    // Helper to get scripts from a folder (NO sub-folders - flat structure)
+    const getScriptsFromFolder = (folder) => {
+      const scripts = []
+      if (folder.contents) {
+        for (const item of folder.contents) {
+          if (item.type === 'script') {
+            scripts.push({ script: item, folder })
+          }
+        }
+      }
+      return scripts
+    }
+
+    // Helper to get ALL scripts from all folders (for 'all' mode only)
+    const getAllScriptsFromFolders = (folders) => {
+      const scripts = []
+      for (const folder of folders) {
+        if (folder.type === 'folder' && folder.contents) {
+          for (const item of folder.contents) {
+            if (item.type === 'script') {
+              scripts.push({ script: item, folder })
+            }
+          }
+        }
+      }
+      return scripts
+    }
+
+    // Get scripts to fetch based on release selection
+    let scriptsWithFolders = []
+    if (releaseToLoad === 'all') {
+      // Load ALL scripts from all release folders
+      scriptsWithFolders = getAllScriptsFromFolders(allFolders)
+    } else {
+      // Load only scripts from the selected release folder
+      scriptsWithFolders = getScriptsFromFolder(releaseToLoad)
+    }
+
+    // Process scripts in batches with higher concurrency
+    for (let i = 0; i < scriptsWithFolders.length; i += MAX_CONCURRENT_SCRIPTS) {
+      const batch = scriptsWithFolders.slice(i, i + MAX_CONCURRENT_SCRIPTS)
+      const results = await Promise.allSettled(
+        batch.map(async ({ script, folder }) => {
+          const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
+          return { script, folder, scriptData }
+        })
+      )
+
+      results.forEach((result) => {
+        if (result.status === 'fulfilled' && result.value) {
+          const { script, folder, scriptData } = result.value
+          const scriptDetails = scriptData?.script || scriptData
+
+          if (scriptDetails.runs && Array.isArray(scriptDetails.runs)) {
+            scriptDetails.runs.forEach(run => {
+              const state = getRunState(run)
+
+              // Get tester info
+              let testerEmail = null
+              const testerFromHeaders = run.headers?._tester
+              const testerFromAssignee = run.assignee?.email
+
+              if (testerFromHeaders && testerFromHeaders !== 'anyone' && testerFromHeaders !== 'guest') {
+                testerEmail = testerFromHeaders
+              } else if (testerFromAssignee && testerFromAssignee.includes('@')) {
+                testerEmail = testerFromAssignee
+              }
+
+              const uniqueId = `${script.id}-${run.id}`
+
+              allRuns.push({
+                id: uniqueId,
+                runId: run.id,
+                runNumber: run.headers?._run || run.id,
+                state,
+                tester: testerEmail,
+                scriptId: script.id,
+                scriptName: script.name,
+                projectId: activeProject.id,
+                projectName: activeProject.name,
+                folderId: folder?.id || null,
+                folderName: folder?.name || null,
+                created: run.created || run.headers?._createdDate,
+                progress: run.progress
+              })
+            })
+          }
+        }
+      })
+    }
+
+    return allRuns.sort((a, b) => (b.runNumber || 0) - (a.runNumber || 0))
+  }, [activeProject, releaseToLoad, allFolders])
+
   const { data: runsData, isLoading, error, refetch } = useQuery({
-    queryKey: ['allRunsForAssignment', selectedProject?.id],
-    queryFn: fetchAllRuns,
-    enabled: projects.length > 0 && !!selectedProject,
+    queryKey: ['runsForRelease', activeProject?.id, releaseToLoad === 'all' ? 'all' : releaseToLoad?.id],
+    queryFn: fetchRunsForRelease,
+    enabled: !!activeProject && !!releaseToLoad,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   })
 
   const allRuns = runsData || []
 
-  // Get unique test suites
+  // Use releases from folders query (already sorted descending)
+  const releases = folderReleases
+
+  // Resolve the effective release ID (handle 'latest' -> actual ID)
+  const effectiveReleaseId = useMemo(() => {
+    if (selectedReleaseId === 'latest' && releases.length > 0) {
+      return releases[0].id // First release is the latest (sorted descending)
+    }
+    if (selectedReleaseId === 'all') {
+      return 'all'
+    }
+    return selectedReleaseId
+  }, [selectedReleaseId, releases])
+
+  // Get unique test suites (from loaded runs - already filtered by release at fetch time)
   const testSuites = useMemo(() => {
     const suiteMap = new Map()
     allRuns.forEach(run => {
@@ -192,9 +321,10 @@ function AssignmentsAndEmail({ embedded = false }) {
     return Array.from(suiteMap.values()).sort((a, b) => a.name.localeCompare(b.name))
   }, [allRuns])
 
-  // Get unique testers
+  // Get unique testers - combine historical testers with current release users
   const allTesters = useMemo(() => {
-    const testerSet = new Set()
+    const testerSet = new Set(historicalTesters)
+    // Also add any testers from current runs
     allRuns.forEach(run => {
       if (run.tester && run.tester.includes('@')) {
         testerSet.add(run.tester)
@@ -205,9 +335,9 @@ function AssignmentsAndEmail({ embedded = false }) {
       if (email && email.includes('@')) testerSet.add(email)
     })
     return Array.from(testerSet).sort()
-  }, [allRuns, runAssignments])
+  }, [historicalTesters, allRuns, runAssignments])
 
-  // Filter and sort runs
+  // Filter and sort runs (release filter not needed - data is pre-filtered at fetch time)
   const filteredRuns = useMemo(() => {
     const filtered = allRuns.filter(run => {
       // Filter by test suite
@@ -220,7 +350,7 @@ function AssignmentsAndEmail({ embedded = false }) {
       }
       return true
     })
-    
+
     // Sort by Test Suite name (alphabetically), then by Run Number (descending)
     return filtered.sort((a, b) => {
       // First sort by Test Suite name
@@ -291,8 +421,8 @@ function AssignmentsAndEmail({ embedded = false }) {
 
   const handleSendEmails = async () => {
     // Get runs that are selected AND have a tester assigned
-    const runsToSend = filteredRuns.filter(run => 
-      selectedRunIds.has(run.id) && 
+    const runsToSend = filteredRuns.filter(run =>
+      selectedRunIds.has(run.id) &&
       run.state === 'new' &&
       runAssignments[run.id]
     )
@@ -309,7 +439,7 @@ function AssignmentsAndEmail({ embedded = false }) {
     for (const run of runsToSend) {
       const testerEmail = runAssignments[run.id]
       setSendingRunIds(prev => new Set([...prev, run.id]))
-      
+
       try {
         await assignAndSendEmail(run.scriptId, run.runId, testerEmail, run.scriptName)
         // Mark email as sent in localStorage with recipient
@@ -331,7 +461,7 @@ function AssignmentsAndEmail({ embedded = false }) {
         errorCount++
         console.error(`Failed to send email for run ${run.id}:`, error)
       }
-      
+
       setSendingRunIds(prev => {
         const newSet = new Set(prev)
         newSet.delete(run.id)
@@ -340,7 +470,7 @@ function AssignmentsAndEmail({ embedded = false }) {
     }
 
     setSendingEmails(false)
-    
+
     if (successCount > 0) {
       message.success(`Successfully sent ${successCount} email(s)`)
     }
@@ -353,13 +483,13 @@ function AssignmentsAndEmail({ embedded = false }) {
   }
 
   // Count ready to send
-  const readyToSendCount = filteredRuns.filter(run => 
-    selectedRunIds.has(run.id) && 
+  const readyToSendCount = filteredRuns.filter(run =>
+    selectedRunIds.has(run.id) &&
     run.state === 'new' &&
     runAssignments[run.id]
   ).length
 
-  const selectedNewCount = filteredRuns.filter(run => 
+  const selectedNewCount = filteredRuns.filter(run =>
     selectedRunIds.has(run.id) && run.state === 'new'
   ).length
 
@@ -416,10 +546,12 @@ function AssignmentsAndEmail({ embedded = false }) {
             <Text strong>Project:</Text>
             <Select
               style={{ width: 180 }}
-              value={selectedProject?.id}
+              value={activeProject?.id}
               onChange={(value) => {
                 const project = projects.find(p => p.id === value)
                 setSelectedProject(project || null)
+                setSelectedReleaseId('latest')
+                setSelectedTestSuiteId('all')
                 setSelectedRunIds(new Set())
                 setRunAssignments({})
               }}
@@ -429,7 +561,30 @@ function AssignmentsAndEmail({ embedded = false }) {
               ))}
             </Select>
           </Space>
-          
+
+          <Space>
+            <Text strong>Release:</Text>
+            <Select
+              style={{ width: 180 }}
+              value={effectiveReleaseId || selectedReleaseId}
+              onChange={(value) => {
+                setSelectedReleaseId(value)
+                setSelectedTestSuiteId('all')
+                setSelectedRunIds(new Set())
+                setRunAssignments({})
+              }}
+              showSearch
+              filterOption={(input, option) =>
+                option.children.toLowerCase().includes(input.toLowerCase())
+              }
+            >
+              <Option value="all">All Releases</Option>
+              {releases.map(r => (
+                <Option key={r.id} value={r.id}>{r.name}</Option>
+              ))}
+            </Select>
+          </Space>
+
           <Space>
             <Text strong>Test Suite:</Text>
             <Select
@@ -447,7 +602,7 @@ function AssignmentsAndEmail({ embedded = false }) {
               ))}
             </Select>
           </Space>
-          
+
           <Space>
             <Text strong>State:</Text>
             <Select
@@ -465,11 +620,11 @@ function AssignmentsAndEmail({ embedded = false }) {
       </Card>
 
       {/* Batch Assignment Section */}
-      <Card 
-        style={{ 
-          marginBottom: 24, 
-          background: '#f0f7ff', 
-          border: '1px solid #91d5ff' 
+      <Card
+        style={{
+          marginBottom: 24,
+          background: '#f0f7ff',
+          border: '1px solid #91d5ff'
         }}
       >
         <div style={{ marginBottom: 16 }}>
@@ -481,10 +636,10 @@ function AssignmentsAndEmail({ embedded = false }) {
         </div>
 
         {/* Select All + Apply to Selected */}
-        <div style={{ 
-          background: '#fff', 
-          padding: '12px 16px', 
-          borderRadius: 6, 
+        <div style={{
+          background: '#fff',
+          padding: '12px 16px',
+          borderRadius: 6,
           marginBottom: 16,
           display: 'flex',
           alignItems: 'center',
@@ -498,9 +653,9 @@ function AssignmentsAndEmail({ embedded = false }) {
           >
             Select All New ({filteredRuns.filter(r => r.state === 'new').length})
           </Checkbox>
-          
+
           <Divider type="vertical" style={{ height: 24 }} />
-          
+
           <Text type="secondary">Apply to selected:</Text>
           <Select
             style={{ width: 220 }}
@@ -517,9 +672,9 @@ function AssignmentsAndEmail({ embedded = false }) {
               <Option key={t} value={t}>{t}</Option>
             ))}
           </Select>
-          <Button 
-            type="primary" 
-            ghost 
+          <Button
+            type="primary"
+            ghost
             onClick={applyBulkTester}
             disabled={!bulkTester || selectedRunIds.size === 0}
           >
@@ -530,8 +685,8 @@ function AssignmentsAndEmail({ embedded = false }) {
         {/* Runs Table */}
         <div style={{ background: '#fff', borderRadius: 6, overflow: 'hidden' }}>
           {/* Header */}
-          <div style={{ 
-            display: 'grid', 
+          <div style={{
+            display: 'grid',
             gridTemplateColumns: '40px 80px 1fr 100px 250px',
             padding: '12px 16px',
             borderBottom: '2px solid #e8e8e8',
@@ -557,10 +712,10 @@ function AssignmentsAndEmail({ embedded = false }) {
                 const isSending = sendingRunIds.has(run.id)
 
                 return (
-                  <div 
+                  <div
                     key={run.id}
-                    style={{ 
-                      display: 'grid', 
+                    style={{
+                      display: 'grid',
                       gridTemplateColumns: '40px 80px 1fr 100px 250px',
                       padding: '12px 16px',
                       borderBottom: '1px solid #f0f0f0',
@@ -571,7 +726,7 @@ function AssignmentsAndEmail({ embedded = false }) {
                   >
                     <div>
                       {isNew ? (
-                        <Checkbox 
+                        <Checkbox
                           checked={isSelected}
                           onChange={() => toggleRunSelection(run.id)}
                         />
@@ -586,13 +741,15 @@ function AssignmentsAndEmail({ embedded = false }) {
                     </div>
                     <div>
                       <div style={{ fontWeight: 500 }}>{run.scriptName}</div>
-                      <div style={{ fontSize: 12, color: '#888' }}>{run.projectName}</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>
+                        {run.projectName}{run.folderName ? ` | ${run.folderName}` : ''}
+                      </div>
                     </div>
                     <div>
                       {(() => {
                         const emailWasSent = hasEmailSent(run.scriptId, run.runId)
                         const emailRecipient = emailWasSent ? getEmailRecipient(run.scriptId, run.runId) : null
-                        
+
                         if (run.state === 'new') {
                           return emailWasSent ? (
                             <Space direction="vertical" size={0}>
@@ -628,7 +785,7 @@ function AssignmentsAndEmail({ embedded = false }) {
                           const emailRecipient = emailWasSent ? getEmailRecipient(run.scriptId, run.runId) : null
                           // If email was sent, show the recipient as the default value (but allow changing it)
                           const defaultValue = assignedTester || emailRecipient || undefined
-                          
+
                           return (
                             <Select
                               style={{ width: '100%' }}
@@ -670,9 +827,9 @@ function AssignmentsAndEmail({ embedded = false }) {
         </div>
 
         {/* Footer Actions */}
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
           alignItems: 'center',
           marginTop: 20,
           paddingTop: 20,
@@ -680,19 +837,19 @@ function AssignmentsAndEmail({ embedded = false }) {
         }}>
           <div>
             <Text type="secondary">
-              <strong style={{ color: '#1890ff' }}>{selectedNewCount}</strong> runs selected, 
+              <strong style={{ color: '#1890ff' }}>{selectedNewCount}</strong> runs selected,
               <strong style={{ color: '#52c41a', marginLeft: 4 }}>{readyToSendCount}</strong> ready to send (have tester assigned)
             </Text>
           </div>
-          <Button 
+          <Button
             type="primary"
             size="large"
             icon={<SendOutlined />}
             onClick={handleSendEmails}
             loading={sendingEmails}
             disabled={readyToSendCount === 0}
-            style={{ 
-              background: '#52c41a', 
+            style={{
+              background: '#52c41a',
               borderColor: '#52c41a',
               height: 44,
               paddingLeft: 24,
@@ -713,8 +870,8 @@ function AssignmentsAndEmail({ embedded = false }) {
         message="Important Note"
         description={
           <Text type="secondary">
-            This app does not sync with Testpad's native assignment system. 
-            Runs marked as "New" may have already been assigned through Testpad directly. 
+            This app does not sync with Testpad's native assignment system.
+            Runs marked as "New" may have already been assigned through Testpad directly.
             The "New" state only indicates that testing has not started yet.
           </Text>
         }

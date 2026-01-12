@@ -79,7 +79,7 @@ function Dashboard() {
   const [selectedUser, setSelectedUser] = useState('all') // Default to 'all' instead of null
   const [selectedState, setSelectedState] = useState('all')
   const [selectedTestSuite, setSelectedTestSuite] = useState(null)
-  const [selectedFolder, setSelectedFolder] = useState(null)
+  const [selectedFolder, setSelectedFolder] = useState('latest') // Default to 'latest'
   const [selectedRun, setSelectedRun] = useState(null)
   // Track which run is selected for each script (scriptId -> runId)
   const [selectedRunByScript, setSelectedRunByScript] = useState({})
@@ -101,7 +101,8 @@ function Dashboard() {
   // Cache key for localStorage
   const getCacheKey = () => {
     const projectId = selectedProject?.id || 'all'
-    return `dashboard_runs_${projectId}`
+    const folderId = selectedFolder || 'all'
+    return `dashboard_runs_${projectId}_${folderId}`
   }
 
   // Load projects
@@ -111,6 +112,11 @@ function Dashboard() {
   })
 
   const projects = projectsData?.projects || []
+
+  // Compute activeProject (same pattern as AssignmentsAndEmail)
+  const activeProject = selectedProject || projects.find(p => 
+    p.name.toLowerCase().includes('testpad api testing')
+  ) || null
 
   // Auto-select the last project (most recent) by default
   useEffect(() => {
@@ -126,6 +132,106 @@ function Dashboard() {
       }
     }
   }, [projects.length]) // Only depend on projects.length, not the full object
+
+  // Fetch folders first to get releases (fast operation)
+  const { data: foldersData } = useQuery({
+    queryKey: ['projectFolders', activeProject?.id],
+    queryFn: async () => {
+      if (!activeProject) return { folders: [], releases: [] }
+      const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`)
+      const folders = response?.folders || []
+      
+      // Extract releases (top-level folders) sorted descending by name
+      const releases = folders
+        .filter(item => item.type === 'folder')
+        .map(folder => ({ id: folder.id, name: folder.name, contents: folder.contents }))
+        .sort((a, b) => b.name.localeCompare(a.name))
+      
+      return { folders, releases }
+    },
+    enabled: !!activeProject,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const folderReleases = foldersData?.releases || []
+  const allFoldersData = foldersData?.folders || []
+
+  // Fetch testers from ALL releases (historical data for dropdown)
+  const { data: historicalTestersData } = useQuery({
+    queryKey: ['historicalTesters', activeProject?.id],
+    queryFn: async () => {
+      if (!activeProject || folderReleases.length === 0) return []
+      
+      const testerSet = new Set()
+      
+      // Helper to get all scripts from folders
+      const getAllScripts = (items) => {
+        const scripts = []
+        for (const item of items) {
+          if (item.type === 'script') {
+            scripts.push(item)
+          } else if (item.type === 'folder' && item.contents) {
+            scripts.push(...getAllScripts(item.contents))
+          }
+        }
+        return scripts
+      }
+      
+      // Get all scripts from all folders
+      const allScripts = getAllScripts(allFoldersData)
+      
+      // Fetch scripts in batches to get tester info
+      const MAX_CONCURRENT = 20
+      for (let i = 0; i < allScripts.length; i += MAX_CONCURRENT) {
+        const batch = allScripts.slice(i, i + MAX_CONCURRENT)
+        const results = await Promise.allSettled(
+          batch.map(script => apiGet(`/api/v1/scripts/${script.id}`))
+        )
+        
+        results.forEach(result => {
+          if (result.status === 'fulfilled' && result.value) {
+            const scriptDetails = result.value?.script || result.value
+            if (scriptDetails.runs && Array.isArray(scriptDetails.runs)) {
+              scriptDetails.runs.forEach(run => {
+                // Extract tester email
+                const testerEmail = run.headers?._tester || run.assignee?.email
+                if (testerEmail && testerEmail.includes('@') && 
+                    testerEmail !== 'anyone' && testerEmail.toLowerCase() !== 'guest') {
+                  testerSet.add(testerEmail)
+                }
+              })
+            }
+          }
+        })
+      }
+      
+      return Array.from(testerSet).sort()
+    },
+    enabled: !!activeProject && folderReleases.length > 0 && allFoldersData.length > 0,
+    staleTime: 10 * 60 * 1000, // Cache for 10 minutes
+    gcTime: 30 * 60 * 1000,
+  })
+
+  const historicalTesters = historicalTestersData || []
+
+  // Resolve effective folder ID (handle 'latest' -> actual ID)
+  const effectiveFolderId = useMemo(() => {
+    if (selectedFolder === 'latest' && folderReleases.length > 0) {
+      return folderReleases[0].id
+    }
+    return selectedFolder
+  }, [selectedFolder, folderReleases])
+
+  // Determine which release to load
+  const releaseToLoad = useMemo(() => {
+    if (selectedFolder === 'latest' || selectedFolder === null) {
+      return folderReleases[0] || null
+    }
+    if (selectedFolder === 'all') {
+      return 'all'
+    }
+    return folderReleases.find(r => r.id === selectedFolder) || null
+  }, [selectedFolder, folderReleases])
 
   // Helper function to calculate progress from results if progress is not available
   const calculateProgressFromResults = (results, tests) => {
@@ -151,255 +257,21 @@ function Dashboard() {
     }
   }
 
-  // Function to get all runs from all projects with progressive loading
-  const fetchAllActiveRuns = async (onProgress) => {
-    if (projects.length === 0) return []
-    
-    // If a project is selected, only fetch runs from that project
-    const projectsToFetch = selectedProject ? [selectedProject] : projects
-
-    const allRuns = []
-    const maxScriptsPerProject = Infinity // No limit - show all scripts
-    const maxConcurrentScripts = 100 // Process 100 scripts in parallel for maximum speed
-    const maxConcurrentProjects = 10 // Process 10 projects in parallel for maximum speed
-    
-    // Reset progressive state
-    if (onProgress) {
-      onProgress([])
-    }
-
-    // Process projects in parallel batches for much faster loading
-    const processProject = async (project) => {
-      try {
-        // Get project folders - wait until response (no hardcoded timeout)
-        const foldersData = await apiGet(`/api/v1/projects/${project.id}/folders`)
-        const folders = foldersData?.folders || []
-
-        // Find all scripts in folders
-        function collectAllScripts(items) {
-          const scripts = []
-          for (const item of items) {
-            if (item.type === 'script') {
-              scripts.push(item)
-            } else if (item.type === 'folder' && item.contents) {
-              scripts.push(...collectAllScripts(item.contents))
-            }
-          }
-          return scripts
-        }
-
-        const allScripts = collectAllScripts(folders)
-        // Limitar scripts para evitar demasiadas llamadas
-        const scripts = allScripts.slice(0, maxScriptsPerProject)
-
-        // Function to find parent folder of a script (handles nested folders)
-        function findParentFolder(items, targetScriptId, currentFolder = null) {
-          for (const item of items) {
-            if (item.type === 'script' && item.id === targetScriptId) {
-              return currentFolder
-            }
-            if (item.type === 'folder') {
-              // Si este folder tiene contents, buscar recursivamente
-              if (item.contents) {
-                const found = findParentFolder(item.contents, targetScriptId, item)
-                if (found !== null && found !== undefined) {
-                  return found
-                }
-              }
-            }
-          }
-          return null
-        }
-
-        // Process ALL scripts in parallel for maximum speed (no batching)
-        const scriptPromises = scripts.map(async (script) => {
-          try {
-            const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
-            return { script, scriptData }
-          } catch (error) {
-            return null
-          }
-        })
-        
-        const scriptResults = await Promise.allSettled(scriptPromises)
-        const validScripts = scriptResults
-          .filter(result => result.status === 'fulfilled' && result.value !== null)
-          .map(result => result.value)
-
-        // Process all scripts results
-        const projectRuns = []
-        for (const { script, scriptData } of validScripts) {
-          try {
-            const scriptDetails = scriptData?.script || scriptData
-
-            if (scriptDetails.runs && Array.isArray(scriptDetails.runs) && scriptDetails.runs.length > 0) {
-              // Find parent folder of this script
-              const parentFolder = findParentFolder(folders, script.id)
-
-              // Add each run with project, folder and script information
-              scriptDetails.runs.forEach(run => {
-                // Parse user information from label or headers
-                let userInfo = null
-                
-                // Try to get from headers first (more reliable)
-                const testerEmail = run.headers?._tester || run.headers?.tester
-                
-                // Check if this is a guest run - multiple ways to detect:
-                // 1. headers._tester === 'guest'
-                // 2. assignee.id === '_guest' (Testpad's internal guest identifier)
-                // 3. assignee.id === '0' (numeric guest identifier)
-                const isGuestByTester = testerEmail && (testerEmail.toLowerCase() === 'guest')
-                const isGuestByAssignee = run.assignee?.id === '_guest' || run.assignee?.id === '0' || run.assignee?.name === 'guest'
-                const isGuestRun = isGuestByTester || isGuestByAssignee
-                
-                if (isGuestRun) {
-                  // The API returns the guest email in assignee.email
-                  // Try to find email in assignee first (most reliable)
-                  let guestEmail = null
-                  
-                  // Check assignee.email first (this is where Testpad stores the guest email)
-                  if (run.assignee?.email && run.assignee.email.includes('@')) {
-                    guestEmail = run.assignee.email
-                  } else if (run.fielddata && Array.isArray(run.fielddata) && run.fielddata[1]?.raw) {
-                    guestEmail = run.fielddata[1].raw
-                  } else if (run.fields && run.fields["1"]) {
-                    guestEmail = run.fields["1"]
-                  } else if (run.data?.fielddata && Array.isArray(run.data.fielddata) && run.data.fielddata[1]?.raw) {
-                    guestEmail = run.data.fielddata[1].raw
-                  } else if (run.data?.fields && run.data.fields["1"]) {
-                    guestEmail = run.data.fields["1"]
-                  } else if (run.emailSentTo) {
-                    guestEmail = run.emailSentTo
-                  } else if (run.data?.emailSentTo) {
-                    guestEmail = run.data.emailSentTo
-                  } else if (run.label) {
-                    // Parse label to see if it has an email
-                    const parts = run.label.split(' / ')
-                    if (parts.length >= 2 && parts[1] && parts[1].includes('@')) {
-                      guestEmail = parts[1]
-                    }
-                  }
-                  
-                  if (guestEmail && guestEmail.includes('@')) {
-                    userInfo = {
-                      email: guestEmail,
-                      date: run.headers?._createdDate || null,
-                      runNumber: run.headers?._run || run.id || null,
-                      isGuest: true
-                    }
-                  } else {
-                    // Show "guest" instead of "Unknown" when we know it's a guest but can't find the email
-                    userInfo = {
-                      email: 'guest',
-                      date: run.headers?._createdDate || null,
-                      runNumber: run.headers?._run || run.id || null,
-                      isGuest: true
-                    }
-                  }
-                } else if (testerEmail && testerEmail !== 'anyone') {
-                  // Regular user assignment
-                  userInfo = {
-                    email: testerEmail,
-                    date: run.headers?._createdDate || null,
-                    runNumber: run.headers?._run || run.id || null,
-                    isGuest: false
-                  }
-                } else if (run.label) {
-                  // Fallback to label parsing
-                  const parts = run.label.split(' / ')
-                  if (parts.length >= 2 && parts[1] && parts[1] !== 'anyone' && parts[1].toLowerCase() !== 'guest') {
-                    userInfo = {
-                      email: parts[1],
-                      date: parts[2] || null,
-                      runNumber: parts[0] || null,
-                      isGuest: false
-                    }
-                  }
-                }
-
-                // Include all runs - use run-specific progress, not script progress
-                projectRuns.push({
-                  ...run,
-                  id: run.id || run.headers?._run || `run-${Math.random()}`,
-                  project: {
-                    id: project.id,
-                    name: project.name
-                  },
-                  folder: parentFolder ? {
-                    id: parentFolder.id,
-                    name: parentFolder.name
-                  } : null,
-                  script: {
-                    id: scriptDetails.id,
-                    name: scriptDetails.name
-                  },
-                  userInfo: userInfo,
-                  // Use run.progress first (run-specific), fallback to run.results if available
-                  progress: run.progress || (run.results ? calculateProgressFromResults(run.results, scriptDetails.tests) : null),
-                  tests: scriptDetails.tests || [], // Include tests to show in side panel
-                  results: run.results || {}, // Include results to identify blocked/failed tests
-                  // Use state from API if available, otherwise will be determined later based on percentage
-                  state: run.state || null, // API should provide state, if not we'll determine it from percentage
-                  created: run.created || run.headers?._createdDate || new Date().toISOString()
-                })
-              })
-            }
-          } catch (error) {
-            // Silently skip failed scripts
-          }
-        }
-        return projectRuns
-      } catch (error) {
-        // Return empty array for this project on error
-        return []
-      }
-    }
-
-    // Process projects in smaller batches to show progress more frequently
-    try {
-      const batchSize = 3 // Process 3 projects at a time for better progress updates
-      for (let i = 0; i < projectsToFetch.length; i += batchSize) {
-        const projectBatch = projectsToFetch.slice(i, i + batchSize)
-        const projectResults = await Promise.allSettled(
-          projectBatch.map(project => processProject(project))
-        )
-        
-        // Collect runs from this batch and emit progress immediately
-        projectResults.forEach((result) => {
-          if (result.status === 'fulfilled' && result.value.length > 0) {
-            allRuns.push(...result.value)
-          }
-        })
-        
-        // Emit progress after each batch completes
-        if (onProgress && allRuns.length > 0) {
-          onProgress([...allRuns])
-        }
-      }
-    } catch (error) {
-      // Silently handle errors
-    }
-
-    return allRuns
-  }
-
   // Progressive loading: fetch runs and update state as they arrive
   useEffect(() => {
     let cancelled = false
     
     const loadRuns = async () => {
-      // Wait for projects to load
-      if (projects.length === 0) {
-        return
-      }
-      
-      // Wait for auto-select to happen (Testpad Api Testing project)
-      const hasTestpadApi = projects.some(p => p.name.toLowerCase().includes('testpad api testing'))
-      if (hasTestpadApi && !selectedProject && !hasManuallySelectedProject) {
+      // Wait for activeProject and releaseToLoad
+      if (!activeProject || !releaseToLoad) {
         return
       }
       
       setIsLoadingProgressive(true)
+      
+      // Clear old cache format
+      const oldCacheKey = `dashboard_runs_${activeProject?.id}`
+      localStorage.removeItem(oldCacheKey)
       
       try {
         // Check cache first
@@ -425,179 +297,149 @@ function Dashboard() {
           }
         }
         
-        const projectsToFetch = selectedProject ? [selectedProject] : projects
         const allRuns = []
-        const maxScriptsPerProject = Infinity // No limit - show all scripts
-        const batchSize = 15 // Process 15 scripts at a time
+        const MAX_CONCURRENT_SCRIPTS = 30
         
-        const processProject = async (project) => {
-          try {
-            const foldersData = await apiGet(`/api/v1/projects/${project.id}/folders`)
-            const folders = foldersData?.folders || []
-            
-            function collectAllScripts(items) {
-              const scripts = []
-              for (const item of items) {
-                if (item.type === 'script') {
-                  scripts.push(item)
-                } else if (item.type === 'folder' && item.contents) {
-                  scripts.push(...collectAllScripts(item.contents))
-                }
+        // Helper to get ALL scripts from a folder (recursive)
+        const getScriptsFromFolder = (folder, parentFolder = null) => {
+          const scripts = []
+          const effectiveFolder = parentFolder || folder
+          if (folder.contents) {
+            for (const item of folder.contents) {
+              if (item.type === 'script') {
+                scripts.push({ script: item, folder: effectiveFolder })
+              } else if (item.type === 'folder' && item.contents) {
+                scripts.push(...getScriptsFromFolder(item, effectiveFolder))
               }
-              return scripts
             }
-            
-            const allScripts = collectAllScripts(folders)
-            const scripts = allScripts.slice(0, maxScriptsPerProject)
-            
-            function findParentFolder(items, targetScriptId, currentFolder = null) {
-              for (const item of items) {
-                if (item.type === 'script' && item.id === targetScriptId) {
-                  return currentFolder
-                }
-                if (item.type === 'folder' && item.contents) {
-                  const found = findParentFolder(item.contents, targetScriptId, item)
-                  if (found !== null && found !== undefined) {
-                    return found
-                  }
-                }
-              }
-              return null
+          }
+          return scripts
+        }
+        
+        // Helper to get ALL scripts with their parent folder (for 'all' mode)
+        const getAllScriptsWithFolder = (items, parentFolder = null) => {
+          const scripts = []
+          for (const item of items) {
+            if (item.type === 'script') {
+              scripts.push({ script: item, folder: parentFolder })
+            } else if (item.type === 'folder' && item.contents) {
+              scripts.push(...getAllScriptsWithFolder(item.contents, item))
             }
-            
-            const scriptPromises = scripts.map(async (script) => {
-              try {
-                const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
-                return { script, scriptData }
-              } catch (error) {
-                return null
-              }
+          }
+          return scripts
+        }
+        
+        // Get scripts to fetch based on release selection
+        let scriptsWithFolders = []
+        if (releaseToLoad === 'all') {
+          scriptsWithFolders = getAllScriptsWithFolder(allFoldersData)
+        } else {
+          scriptsWithFolders = getScriptsFromFolder(releaseToLoad)
+        }
+        
+        // Process scripts in batches
+        for (let i = 0; i < scriptsWithFolders.length; i += MAX_CONCURRENT_SCRIPTS) {
+          if (cancelled) break
+          
+          const batch = scriptsWithFolders.slice(i, i + MAX_CONCURRENT_SCRIPTS)
+          const results = await Promise.allSettled(
+            batch.map(async ({ script, folder }) => {
+              const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
+              return { script, folder, scriptData }
             })
-            
-            const scriptResults = await Promise.allSettled(scriptPromises)
-            const validScripts = scriptResults
-              .filter(result => result.status === 'fulfilled' && result.value !== null)
-              .map(result => result.value)
-            
-            const projectRuns = []
-            for (const { script, scriptData } of validScripts) {
-              try {
-                const scriptDetails = scriptData?.script || scriptData
-                if (scriptDetails.runs && Array.isArray(scriptDetails.runs) && scriptDetails.runs.length > 0) {
-                  const parentFolder = findParentFolder(folders, script.id)
-                  scriptDetails.runs.forEach(run => {
-                    let userInfo = null
-                    const testerEmail = run.headers?._tester || run.headers?.tester
-                    const isGuestByTester = testerEmail && (testerEmail.toLowerCase() === 'guest')
-                    const isGuestByAssignee = run.assignee?.id === '_guest' || run.assignee?.id === '0' || run.assignee?.name === 'guest'
-                    const isGuestRun = isGuestByTester || isGuestByAssignee
-                    
-                    if (isGuestRun) {
-                      let guestEmail = null
-                      if (run.assignee?.email && run.assignee.email.includes('@')) {
-                        guestEmail = run.assignee.email
-                      } else if (run.fielddata && Array.isArray(run.fielddata) && run.fielddata[1]?.raw) {
-                        guestEmail = run.fielddata[1].raw
-                      } else if (run.fields && run.fields["1"]) {
-                        guestEmail = run.fields["1"]
-                      } else if (run.data?.fielddata && Array.isArray(run.data.fielddata) && run.data.fielddata[1]?.raw) {
-                        guestEmail = run.data.fielddata[1].raw
-                      } else if (run.data?.fields && run.data.fields["1"]) {
-                        guestEmail = run.data.fields["1"]
-                      } else if (run.emailSentTo) {
-                        guestEmail = run.emailSentTo
-                      } else if (run.data?.emailSentTo) {
-                        guestEmail = run.data.emailSentTo
-                      } else if (run.label) {
-                        const parts = run.label.split(' / ')
-                        if (parts.length >= 2 && parts[1] && parts[1].includes('@')) {
-                          guestEmail = parts[1]
-                        }
-                      }
-                      
-                      if (guestEmail && guestEmail.includes('@')) {
-                        userInfo = {
-                          email: guestEmail,
-                          date: run.headers?._createdDate || null,
-                          runNumber: run.headers?._run || run.id || null,
-                          isGuest: true
-                        }
-                      } else {
-                        userInfo = {
-                          email: 'guest',
-                          date: run.headers?._createdDate || null,
-                          runNumber: run.headers?._run || run.id || null,
-                          isGuest: true
-                        }
-                      }
-                    } else if (testerEmail && testerEmail !== 'anyone') {
-                      userInfo = {
-                        email: testerEmail,
-                        date: run.headers?._createdDate || null,
-                        runNumber: run.headers?._run || run.id || null,
-                        isGuest: false
-                      }
+          )
+          
+          results.forEach((result) => {
+            if (result.status === 'fulfilled' && result.value) {
+              const { script, folder, scriptData } = result.value
+              const scriptDetails = scriptData?.script || scriptData
+              
+              if (scriptDetails.runs && Array.isArray(scriptDetails.runs) && scriptDetails.runs.length > 0) {
+                scriptDetails.runs.forEach(run => {
+                  let userInfo = null
+                  const testerEmail = run.headers?._tester || run.headers?.tester
+                  const isGuestByTester = testerEmail && (testerEmail.toLowerCase() === 'guest')
+                  const isGuestByAssignee = run.assignee?.id === '_guest' || run.assignee?.id === '0' || run.assignee?.name === 'guest'
+                  const isGuestRun = isGuestByTester || isGuestByAssignee
+                  
+                  if (isGuestRun) {
+                    let guestEmail = null
+                    if (run.assignee?.email && run.assignee.email.includes('@')) {
+                      guestEmail = run.assignee.email
+                    } else if (run.fielddata && Array.isArray(run.fielddata) && run.fielddata[1]?.raw) {
+                      guestEmail = run.fielddata[1].raw
+                    } else if (run.fields && run.fields["1"]) {
+                      guestEmail = run.fields["1"]
+                    } else if (run.data?.fielddata && Array.isArray(run.data.fielddata) && run.data.fielddata[1]?.raw) {
+                      guestEmail = run.data.fielddata[1].raw
+                    } else if (run.data?.fields && run.data.fields["1"]) {
+                      guestEmail = run.data.fields["1"]
+                    } else if (run.emailSentTo) {
+                      guestEmail = run.emailSentTo
+                    } else if (run.data?.emailSentTo) {
+                      guestEmail = run.data.emailSentTo
                     } else if (run.label) {
                       const parts = run.label.split(' / ')
-                      if (parts.length >= 2 && parts[1] && parts[1] !== 'anyone' && parts[1].toLowerCase() !== 'guest') {
-                        userInfo = {
-                          email: parts[1],
-                          date: parts[2] || null,
-                          runNumber: parts[0] || null,
-                          isGuest: false
-                        }
+                      if (parts.length >= 2 && parts[1] && parts[1].includes('@')) {
+                        guestEmail = parts[1]
                       }
                     }
                     
-                    projectRuns.push({
-                      ...run,
-                      id: run.id || run.headers?._run || `run-${Math.random()}`,
-                      project: { id: project.id, name: project.name },
-                      folder: parentFolder ? { id: parentFolder.id, name: parentFolder.name } : null,
-                      script: { id: scriptDetails.id, name: scriptDetails.name },
-                      userInfo: userInfo,
-                      progress: run.progress || (run.results ? calculateProgressFromResults(run.results, scriptDetails.tests) : null),
-                      tests: scriptDetails.tests || [],
-                      results: run.results || {}, // Include results to identify blocked/failed tests
-                      state: run.state || null,
-                      created: run.created || run.headers?._createdDate || new Date().toISOString()
-                    })
+                    if (guestEmail && guestEmail.includes('@')) {
+                      userInfo = {
+                        email: guestEmail,
+                        date: run.headers?._createdDate || null,
+                        runNumber: run.headers?._run || run.id || null,
+                        isGuest: true
+                      }
+                    } else {
+                      userInfo = {
+                        email: 'guest',
+                        date: run.headers?._createdDate || null,
+                        runNumber: run.headers?._run || run.id || null,
+                        isGuest: true
+                      }
+                    }
+                  } else if (testerEmail && testerEmail !== 'anyone') {
+                    userInfo = {
+                      email: testerEmail,
+                      date: run.headers?._createdDate || null,
+                      runNumber: run.headers?._run || run.id || null,
+                      isGuest: false
+                    }
+                  } else if (run.label) {
+                    const parts = run.label.split(' / ')
+                    if (parts.length >= 2 && parts[1] && parts[1] !== 'anyone' && parts[1].toLowerCase() !== 'guest') {
+                      userInfo = {
+                        email: parts[1],
+                        date: parts[2] || null,
+                        runNumber: parts[0] || null,
+                        isGuest: false
+                      }
+                    }
+                  }
+                  
+                  allRuns.push({
+                    ...run,
+                    id: run.id || run.headers?._run || `run-${Math.random()}`,
+                    project: { id: activeProject.id, name: activeProject.name },
+                    folder: folder ? { id: folder.id, name: folder.name } : null,
+                    script: { id: scriptDetails.id, name: scriptDetails.name },
+                    userInfo: userInfo,
+                    progress: run.progress || (run.results ? calculateProgressFromResults(run.results, scriptDetails.tests) : null),
+                    tests: scriptDetails.tests || [],
+                    results: run.results || {},
+                    state: run.state || null,
+                    created: run.created || run.headers?._createdDate || new Date().toISOString()
                   })
-                }
-              } catch (error) {
-                // Silently skip failed scripts
+                })
               }
-            }
-            return projectRuns
-          } catch (error) {
-            return []
-          }
-        }
-        
-        // Process projects in batches
-        for (let i = 0; i < projectsToFetch.length; i += batchSize) {
-          if (cancelled) break
-          
-          const projectBatch = projectsToFetch.slice(i, i + batchSize)
-          const projectResults = await Promise.allSettled(
-            projectBatch.map(project => processProject(project))
-          )
-          
-          projectResults.forEach((result) => {
-            if (result.status === 'fulfilled' && result.value.length > 0) {
-              allRuns.push(...result.value)
             }
           })
           
+          // Update progress after each batch
           if (!cancelled && allRuns.length > 0) {
             setProgressiveRuns([...allRuns])
-            
-            // Update cache progressively
-            const cacheKey = getCacheKey()
-            localStorage.setItem(cacheKey, JSON.stringify({
-              data: allRuns,
-              timestamp: Date.now()
-            }))
           }
         }
         
@@ -606,7 +448,7 @@ function Dashboard() {
           setIsLoadingProgressive(false)
           setError(null)
           
-          // Save final result to cache
+          // Save to cache
           const cacheKey = getCacheKey()
           localStorage.setItem(cacheKey, JSON.stringify({
             data: allRuns,
@@ -626,7 +468,7 @@ function Dashboard() {
     return () => {
       cancelled = true
     }
-  }, [projects.length, selectedProject?.id, hasManuallySelectedProject])
+  }, [activeProject?.id, releaseToLoad, allFoldersData])
 
   // Use progressive runs for display
   const allRuns = progressiveRuns
@@ -654,12 +496,10 @@ function Dashboard() {
       return false
     }
     
-    // Filter by folder (release/version)
-    if (selectedFolder && selectedFolder !== 'all') {
-      if (selectedFolder === 'archived') {
-        // For now, archived filter doesn't filter anything (will be implemented later)
-        // This is a placeholder for future functionality
-      } else if (run.folder?.id !== selectedFolder) {
+    // Filter by folder (release/version) - use effectiveFolderId to handle 'latest'
+    // Skip filter if effectiveFolderId is still 'latest' (folders haven't loaded yet)
+    if (effectiveFolderId && effectiveFolderId !== 'all' && effectiveFolderId !== 'latest') {
+      if (run.folder?.id !== effectiveFolderId) {
         return false
       }
     }
@@ -692,8 +532,17 @@ function Dashboard() {
     return true
   })
 
-  // Get unique users list (sorted alphabetically)
-  const users = [...new Set(allRuns.map(run => run.userInfo?.email).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  // Get unique users list - combine historical testers with current release users
+  const users = useMemo(() => {
+    const userSet = new Set(historicalTesters)
+    // Also add any users from current runs (in case there are new ones)
+    allRuns.forEach(run => {
+      if (run.userInfo?.email && run.userInfo.email.includes('@')) {
+        userSet.add(run.userInfo.email)
+      }
+    })
+    return Array.from(userSet).sort((a, b) => a.localeCompare(b))
+  }, [historicalTesters, allRuns])
 
   // Get unique test suites (scripts) list
   const testSuites = useMemo(() => {
@@ -709,27 +558,11 @@ function Dashboard() {
     return Array.from(suites.values()).sort((a, b) => a.name.localeCompare(b.name))
   }, [allRuns])
 
-  // Get unique folders list (for filtering by release/version)
-  // Sort descending so latest (e.g., "Release v1.138") appears first
-  const folders = useMemo(() => {
-    const folderMap = new Map()
-    allRuns.forEach(run => {
-      if (run.folder?.id && run.folder?.name) {
-        folderMap.set(run.folder.id, {
-          id: run.folder.id,
-          name: run.folder.name
-        })
-      }
-    })
-    return Array.from(folderMap.values()).sort((a, b) => b.name.localeCompare(a.name))
-  }, [allRuns])
+  // Use releases from folders query (already sorted descending)
+  const folders = folderReleases
 
-  // Auto-select first folder (Latest) by default
-  useEffect(() => {
-    if (folders.length > 0 && !selectedFolder) {
-      setSelectedFolder(folders[0].id)
-    }
-  }, [folders.length, selectedFolder])
+  // No need for auto-select useEffect - selectedFolder defaults to 'latest' 
+  // and effectiveFolderId resolves it to the actual ID
 
   // Group runs by script (script.id)
   const runsByScript = useMemo(() => {
@@ -1036,7 +869,7 @@ function Dashboard() {
                   filterOption={(input, option) =>
                     (option?.children?.toLowerCase() || '').includes(input.toLowerCase())
                   }
-                  value={selectedProject?.id || 'all'}
+                  value={activeProject?.id || 'all'}
                   onChange={(value) => {
                     setHasManuallySelectedProject(true) // Mark that user has manually selected
                     if (value === 'all' || !value) {
@@ -1045,6 +878,10 @@ function Dashboard() {
                       const project = projects.find(p => Number(p.id) === Number(value))
                       setSelectedProject(project || null)
                     }
+                    // Reset folder to latest when changing project
+                    setSelectedFolder('latest')
+                    setSelectedTestSuite(null)
+                    setSelectedRun(null)
                   }}
                 >
                   <Option value="all">All projects</Option>
@@ -1110,17 +947,19 @@ function Dashboard() {
                   filterOption={(input, option) =>
                     (option?.children?.toLowerCase() || '').includes(input.toLowerCase())
                   }
-                  value={selectedFolder || 'all'}
+                  value={effectiveFolderId || selectedFolder || 'all'}
                   onChange={(value) => {
                     if (value === 'all' || !value) {
-                      setSelectedFolder(null)
+                      setSelectedFolder('all')
                     } else {
                       setSelectedFolder(value)
                     }
+                    // Clear dependent selections
+                    setSelectedTestSuite(null)
+                    setSelectedRun(null)
                   }}
                 >
                   <Option value="all">All folders</Option>
-                  <Option value="archived">Archived</Option>
                   {folders.map(folder => (
                     <Option key={folder.id} value={folder.id}>
                       {folder.name}
