@@ -112,14 +112,17 @@ function Dashboard() {
 
   const projects = projectsData?.projects || []
 
-  // Auto-select Testpad Api Testing project by default (only once on initial load)
+  // Auto-select the last project (most recent) by default
   useEffect(() => {
     if (projects.length > 0 && !selectedProject && !hasManuallySelectedProject) {
+      // Select the last project (most recent) - or find "Testpad Api Testing" as fallback
       const testpadApiProject = projects.find(p => 
         p.name.toLowerCase().includes('testpad api testing')
       )
-      if (testpadApiProject) {
-        setSelectedProject(testpadApiProject)
+      // Prefer "Testpad Api Testing" if found, otherwise select the last project
+      const defaultProject = testpadApiProject || projects[projects.length - 1]
+      if (defaultProject) {
+        setSelectedProject(defaultProject)
       }
     }
   }, [projects.length]) // Only depend on projects.length, not the full object
@@ -707,6 +710,7 @@ function Dashboard() {
   }, [allRuns])
 
   // Get unique folders list (for filtering by release/version)
+  // Sort descending so latest (e.g., "Release v1.138") appears first
   const folders = useMemo(() => {
     const folderMap = new Map()
     allRuns.forEach(run => {
@@ -717,8 +721,15 @@ function Dashboard() {
         })
       }
     })
-    return Array.from(folderMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+    return Array.from(folderMap.values()).sort((a, b) => b.name.localeCompare(a.name))
   }, [allRuns])
+
+  // Auto-select first folder (Latest) by default
+  useEffect(() => {
+    if (folders.length > 0 && !selectedFolder) {
+      setSelectedFolder(folders[0].id)
+    }
+  }, [folders.length, selectedFolder])
 
   // Group runs by script (script.id)
   const runsByScript = useMemo(() => {

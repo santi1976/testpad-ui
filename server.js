@@ -398,7 +398,7 @@ async function startServer() {
   }
 
   app.listen(PORT, () => {
-    // Server started
+    console.log(`🚀 Server running on http://localhost:${PORT}`)
   })
 }
 
