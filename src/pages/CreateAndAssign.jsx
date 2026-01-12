@@ -154,15 +154,15 @@ function CreateAndAssign({ embedded = false }) {
     return allScripts.filter(s => selectedScriptIds.has(s.id))
   }, [allScripts, selectedScriptIds])
 
-  // Get users from cache
-  const { data: testSuitesData } = useQuery({
-    queryKey: ['testSuitesWithRuns', selectedProject?.id, projects.length],
+  // Get ALL testers from ALL projects (cached globally)
+  const { data: allTestersData } = useQuery({
+    queryKey: ['allTesters'],
     queryFn: async () => {
       if (projects.length === 0) return []
-      const projectsToFetch = selectedProject ? [selectedProject] : projects
-      const testSuitesMap = new Map()
+      const testerSet = new Set()
       
-      for (const project of projectsToFetch) {
+      // Process all projects to extract testers
+      for (const project of projects) {
         try {
           const foldersResponse = await apiGet(`/api/v1/projects/${project.id}/folders`)
           const foldersData = foldersResponse?.folders || []
@@ -178,37 +178,42 @@ function CreateAndAssign({ embedded = false }) {
             return scripts
           }
           
-          const scripts = collectScripts(foldersData).slice(0, 50)
+          const scripts = collectScripts(foldersData).slice(0, 30) // Limit per project for speed
           
           const scriptResults = await Promise.allSettled(
             scripts.map(async (script) => {
               const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
-              return { script, scriptData }
+              return scriptData
             })
           )
           
           scriptResults.forEach(result => {
             if (result.status === 'fulfilled' && result.value) {
-              const { script, scriptData } = result.value
-              const scriptDetails = scriptData?.script || scriptData
+              const scriptDetails = result.value?.script || result.value
+              const runs = scriptDetails?.runs || []
               
-              if (scriptDetails.runs && Array.isArray(scriptDetails.runs)) {
-                const runs = scriptDetails.runs.map(run => {
-                  let testerEmail = null
-                  const testerFromHeaders = run.headers?._tester
-                  const testerFromAssignee = run.assignee?.email
-                  
-                  if (testerFromHeaders && testerFromHeaders !== 'anyone' && testerFromHeaders !== 'guest') {
-                    testerEmail = testerFromHeaders
-                  } else if (testerFromAssignee && testerFromAssignee.includes('@')) {
-                    testerEmail = testerFromAssignee
+              runs.forEach(run => {
+                // Extract from headers._tester
+                const testerFromHeaders = run.headers?._tester
+                if (testerFromHeaders && testerFromHeaders !== 'anyone' && testerFromHeaders !== 'guest' && testerFromHeaders.includes('@')) {
+                  testerSet.add(testerFromHeaders)
+                }
+                // Extract from assignee.email
+                const testerFromAssignee = run.assignee?.email
+                if (testerFromAssignee && testerFromAssignee.includes('@')) {
+                  testerSet.add(testerFromAssignee)
+                }
+                // Extract from label (format: "number / email / date / status")
+                if (run.label) {
+                  const parts = run.label.split(' / ')
+                  if (parts.length >= 2) {
+                    const email = parts[1].trim()
+                    if (email.includes('@') && email !== 'anyone' && email !== 'guest') {
+                      testerSet.add(email)
+                    }
                   }
-                  
-                  return { id: run.id, tester: testerEmail }
-                })
-                
-                testSuitesMap.set(script.id, { id: script.id, runs })
-              }
+                }
+              })
             }
           })
         } catch (error) {
@@ -216,29 +221,28 @@ function CreateAndAssign({ embedded = false }) {
         }
       }
       
-      return Array.from(testSuitesMap.values())
+      return Array.from(testerSet).sort()
     },
     enabled: projects.length > 0,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 30 * 60 * 1000, // Cache for 30 minutes
   })
 
-  // Extract users
+  // Extract users - combine from allTesters + current assignments
   const users = useMemo(() => {
     const userSet = new Set()
-    if (testSuitesData && Array.isArray(testSuitesData)) {
-      testSuitesData.forEach(suite => {
-        suite.runs?.forEach(run => {
-          if (run.tester && run.tester !== 'anyone' && run.tester.includes('@')) {
-            userSet.add(run.tester)
-          }
-        })
-      })
+    
+    // Add all testers from global cache
+    if (allTestersData && Array.isArray(allTestersData)) {
+      allTestersData.forEach(email => userSet.add(email))
     }
+    
+    // Add testers from current assignments
     Object.values(runAssignments).forEach(email => {
       if (email && email.includes('@')) userSet.add(email)
     })
+    
     return Array.from(userSet).sort()
-  }, [testSuitesData, runAssignments])
+  }, [allTestersData, runAssignments])
 
   // Create runs mutation
   const createRunsMutation = useMutation({
