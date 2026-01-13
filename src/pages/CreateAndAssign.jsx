@@ -178,7 +178,7 @@ function CreateAndAssign({ embedded = false }) {
             return scripts
           }
           
-          const scripts = collectScripts(foldersData).slice(0, 30) // Limit per project for speed
+          const scripts = collectScripts(foldersData) // No limit - get all scripts
           
           const scriptResults = await Promise.allSettled(
             scripts.map(async (script) => {

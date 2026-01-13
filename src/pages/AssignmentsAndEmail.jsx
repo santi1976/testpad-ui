@@ -151,11 +151,26 @@ function AssignmentsAndEmail({ embedded = false }) {
             const scriptDetails = result.value?.script || result.value
             if (scriptDetails.runs && Array.isArray(scriptDetails.runs)) {
               scriptDetails.runs.forEach(run => {
-                // Extract tester email
-                const testerEmail = run.headers?._tester || run.assignee?.email
-                if (testerEmail && testerEmail.includes('@') && 
-                    testerEmail !== 'anyone' && testerEmail.toLowerCase() !== 'guest') {
-                  testerSet.add(testerEmail)
+                // Extract from headers._tester
+                const testerFromHeaders = run.headers?._tester
+                if (testerFromHeaders && testerFromHeaders.includes('@') && 
+                    testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
+                  testerSet.add(testerFromHeaders)
+                }
+                // Extract from assignee.email
+                const testerFromAssignee = run.assignee?.email
+                if (testerFromAssignee && testerFromAssignee.includes('@')) {
+                  testerSet.add(testerFromAssignee)
+                }
+                // Extract from label (format: "number / email / date / status")
+                if (run.label) {
+                  const parts = run.label.split(' / ')
+                  if (parts.length >= 2) {
+                    const email = parts[1].trim()
+                    if (email.includes('@') && email !== 'anyone' && email.toLowerCase() !== 'guest') {
+                      testerSet.add(email)
+                    }
+                  }
                 }
               })
             }
