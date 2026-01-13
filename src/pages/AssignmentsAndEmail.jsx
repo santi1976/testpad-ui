@@ -84,10 +84,10 @@ function AssignmentsAndEmail({ embedded = false }) {
 
   // Known default project - start loading immediately without waiting for projects list
   const DEFAULT_PROJECT_NAME = 'Testpad Api Testing'
-  
+
   // Use selectedProject if set, otherwise create a temporary object for the default
   // This allows folders query to start immediately
-  const activeProject = selectedProject || (projects.find(p => 
+  const activeProject = selectedProject || (projects.find(p =>
     p.name.toLowerCase().includes('testpad api testing')
   )) || null
 
@@ -98,13 +98,13 @@ function AssignmentsAndEmail({ embedded = false }) {
       if (!activeProject) return { folders: [], releases: [] }
       const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`)
       const folders = response?.folders || []
-      
+
       // Extract releases (top-level folders) sorted descending by name
       const releases = folders
         .filter(item => item.type === 'folder')
         .map(folder => ({ id: folder.id, name: folder.name, contents: folder.contents }))
         .sort((a, b) => b.name.localeCompare(a.name))
-      
+
       return { folders, releases }
     },
     enabled: !!activeProject,
@@ -114,14 +114,17 @@ function AssignmentsAndEmail({ embedded = false }) {
   const folderReleases = foldersData?.releases || []
   const allFolders = foldersData?.folders || []
 
+  // Get the latest release ID (first in the sorted list)
+  const latestReleaseId = folderReleases.length > 0 ? folderReleases[0].id : null
+
   // Fetch testers from ALL releases (historical data for dropdown)
   const { data: historicalTestersData } = useQuery({
     queryKey: ['historicalTesters', activeProject?.id],
     queryFn: async () => {
       if (!activeProject || folderReleases.length === 0) return []
-      
+
       const testerSet = new Set()
-      
+
       // Helper to get all scripts from folders
       const getAllScripts = (items) => {
         const scripts = []
@@ -134,10 +137,10 @@ function AssignmentsAndEmail({ embedded = false }) {
         }
         return scripts
       }
-      
+
       // Get all scripts from all folders
       const allScripts = getAllScripts(allFolders)
-      
+
       // Fetch scripts in batches to get tester info
       const MAX_CONCURRENT = 20
       for (let i = 0; i < allScripts.length; i += MAX_CONCURRENT) {
@@ -145,7 +148,7 @@ function AssignmentsAndEmail({ embedded = false }) {
         const results = await Promise.allSettled(
           batch.map(script => apiGet(`/api/v1/scripts/${script.id}`))
         )
-        
+
         results.forEach(result => {
           if (result.status === 'fulfilled' && result.value) {
             const scriptDetails = result.value?.script || result.value
@@ -153,8 +156,8 @@ function AssignmentsAndEmail({ embedded = false }) {
               scriptDetails.runs.forEach(run => {
                 // Extract from headers._tester
                 const testerFromHeaders = run.headers?._tester
-                if (testerFromHeaders && testerFromHeaders.includes('@') && 
-                    testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
+                if (testerFromHeaders && testerFromHeaders.includes('@') &&
+                  testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
                   testerSet.add(testerFromHeaders)
                 }
                 // Extract from assignee.email
@@ -177,7 +180,7 @@ function AssignmentsAndEmail({ embedded = false }) {
           }
         })
       }
-      
+
       return Array.from(testerSet).sort()
     },
     enabled: !!activeProject && folderReleases.length > 0 && allFolders.length > 0,
@@ -650,30 +653,59 @@ function AssignmentsAndEmail({ embedded = false }) {
           </Space>
         </div>
 
-        {/* Select All + Apply to Selected */}
+        {/* Select All + Apply to Selected - IMPROVED */}
         <div style={{
-          background: '#fff',
-          padding: '12px 16px',
-          borderRadius: 6,
+          background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+          padding: '16px',
+          borderRadius: 8,
           marginBottom: 16,
+          border: '1px solid #e2e8f0',
           display: 'flex',
           alignItems: 'center',
           gap: 16,
           flexWrap: 'wrap'
         }}>
-          <Checkbox
-            checked={selectedNewCount > 0 && selectedNewCount === filteredRuns.filter(r => r.state === 'new').length}
-            indeterminate={selectedNewCount > 0 && selectedNewCount < filteredRuns.filter(r => r.state === 'new').length}
-            onChange={(e) => e.target.checked ? selectAllNew() : clearSelection()}
-          >
-            Select All New ({filteredRuns.filter(r => r.state === 'new').length})
-          </Checkbox>
+          {/* Counter */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '8px 16px',
+            background: 'white',
+            borderRadius: 6,
+            border: '1px solid #e2e8f0'
+          }}>
+            <span style={{ fontSize: 24, fontWeight: 700, color: '#1890ff' }}>
+              {selectedNewCount}
+            </span>
+            <div>
+              <div style={{ fontSize: 13, color: '#666', lineHeight: 1.2 }}>selected</div>
+              <div style={{ fontSize: 11, color: '#999' }}>of {filteredRuns.filter(r => r.state === 'new').length} new runs</div>
+            </div>
+          </div>
 
-          <Divider type="vertical" style={{ height: 24 }} />
+          {/* Selection actions */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(() => {
+              const newRunsCount = filteredRuns.filter(r => r.state === 'new').length
+              const allNewSelected = selectedNewCount > 0 && selectedNewCount === newRunsCount
+              return (
+                <Button
+                  type={allNewSelected ? 'primary' : 'default'}
+                  onClick={() => allNewSelected ? clearSelection() : selectAllNew()}
+                >
+                  {allNewSelected ? 'Deselect All' : `Select All New (${newRunsCount})`}
+                </Button>
+              )
+            })()}
+            {selectedNewCount > 0 && (
+              <Button onClick={clearSelection}>Clear</Button>
+            )}
+          </div>
 
-          <Text type="secondary">Apply to selected:</Text>
+          {/* Tester selector */}
           <Select
-            style={{ width: 220 }}
+            style={{ width: 240 }}
             placeholder="Choose tester..."
             value={bulkTester}
             onChange={setBulkTester}
@@ -687,13 +719,30 @@ function AssignmentsAndEmail({ embedded = false }) {
               <Option key={t} value={t}>{t}</Option>
             ))}
           </Select>
+
+          {/* Ready indicator */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            background: readyToSendCount > 0 ? '#f6ffed' : '#fff7e6',
+            border: `1px solid ${readyToSendCount > 0 ? '#b7eb8f' : '#ffe58f'}`,
+            borderRadius: 6,
+            color: readyToSendCount > 0 ? '#389e0d' : '#d48806',
+            fontSize: 13
+          }}>
+            {readyToSendCount > 0 ? <CheckCircleOutlined /> : <WarningOutlined />}
+            {readyToSendCount} ready to send
+          </div>
+
+          {/* Apply button */}
           <Button
             type="primary"
-            ghost
             onClick={applyBulkTester}
             disabled={!bulkTester || selectedRunIds.size === 0}
           >
-            Apply to Selected
+            Apply to {selectedNewCount} Selected
           </Button>
         </div>
 
@@ -756,8 +805,42 @@ function AssignmentsAndEmail({ embedded = false }) {
                     </div>
                     <div>
                       <div style={{ fontWeight: 500 }}>{run.scriptName}</div>
-                      <div style={{ fontSize: 12, color: '#888' }}>
-                        {run.projectName}{run.folderName ? ` | ${run.folderName}` : ''}
+                      <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                        {/* Project tag - always blue */}
+                        <Tag style={{
+                          margin: 0,
+                          fontSize: 11,
+                          padding: '1px 6px',
+                          background: '#f0f5ff',
+                          color: '#2f54eb',
+                          border: '1px solid #adc6ff'
+                        }}>
+                          {run.projectName}
+                        </Tag>
+                        {/* Release tag - green for latest, orange for others */}
+                        {run.folderId === latestReleaseId ? (
+                          <Tag style={{
+                            margin: 0,
+                            fontSize: 11,
+                            padding: '1px 6px',
+                            background: '#f6ffed',
+                            color: '#389e0d',
+                            border: '1px solid #b7eb8f'
+                          }}>
+                            ✓ {run.folderName} (Latest)
+                          </Tag>
+                        ) : (
+                          <Tag style={{
+                            margin: 0,
+                            fontSize: 11,
+                            padding: '1px 6px',
+                            background: '#fff7e6',
+                            color: '#d48806',
+                            border: '1px solid #ffe58f'
+                          }}>
+                            {run.folderName}
+                          </Tag>
+                        )}
                       </div>
                     </div>
                     <div>
@@ -847,14 +930,20 @@ function AssignmentsAndEmail({ embedded = false }) {
           justifyContent: 'space-between',
           alignItems: 'center',
           marginTop: 20,
-          paddingTop: 20,
-          borderTop: '1px solid #d9d9d9'
+          padding: '16px 20px',
+          background: 'white',
+          borderRadius: 8,
+          border: '1px solid #1890ff'
         }}>
           <div>
-            <Text type="secondary">
-              <strong style={{ color: '#1890ff' }}>{selectedNewCount}</strong> runs selected,
-              <strong style={{ color: '#52c41a', marginLeft: 4 }}>{readyToSendCount}</strong> ready to send (have tester assigned)
-            </Text>
+            <div style={{ fontSize: 14, color: '#333' }}>
+              <strong style={{ color: '#1890ff', fontSize: 16 }}>{selectedNewCount}</strong>
+              <span style={{ color: '#666' }}> of {filteredRuns.filter(r => r.state === 'new').length} selected</span>
+            </div>
+            <div style={{ fontSize: 13, color: '#52c41a', marginTop: 4 }}>
+              <CheckCircleOutlined style={{ marginRight: 4 }} />
+              {readyToSendCount} have tester assigned
+            </div>
           </div>
           <Button
             type="primary"
@@ -872,7 +961,7 @@ function AssignmentsAndEmail({ embedded = false }) {
               fontWeight: 600
             }}
           >
-            Assign & Send Email ({readyToSendCount})
+            Assign & Send ({readyToSendCount})
           </Button>
         </div>
       </Card>

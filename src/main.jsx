@@ -9,7 +9,7 @@ import App from './App'
 import TestSuiteDetails from './pages/TestSuiteDetails'
 import Dashboard from './pages/Dashboard'
 import TestExecutions from './pages/Runs'
-import Assignments from './pages/Assignments'
+
 import CreateAndAssign from './pages/CreateAndAssign'
 import './index.css'
 
@@ -65,14 +65,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/assignments"
-              element={
-                <ProtectedRoute>
-                  <Assignments />
-                </ProtectedRoute>
-              }
-            />
+
             <Route
               path="/create-and-assign"
               element={
