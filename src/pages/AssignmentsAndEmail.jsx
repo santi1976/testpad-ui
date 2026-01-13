@@ -54,6 +54,9 @@ function AssignmentsAndEmail({ embedded = false }) {
   const [selectedRunIds, setSelectedRunIds] = useState(new Set())
   const [runAssignments, setRunAssignments] = useState({}) // runId -> email
   const [bulkTester, setBulkTester] = useState(null)
+  
+  // Cache of selected runs info (persists across release changes)
+  const [selectedRunsCache, setSelectedRunsCache] = useState({}) // runId -> run info
 
   // Loading states
   const [sendingEmails, setSendingEmails] = useState(false)
@@ -84,10 +87,10 @@ function AssignmentsAndEmail({ embedded = false }) {
 
   // Known default project - start loading immediately without waiting for projects list
   const DEFAULT_PROJECT_NAME = 'Testpad Api Testing'
-
+  
   // Use selectedProject if set, otherwise create a temporary object for the default
   // This allows folders query to start immediately
-  const activeProject = selectedProject || (projects.find(p =>
+  const activeProject = selectedProject || (projects.find(p => 
     p.name.toLowerCase().includes('testpad api testing')
   )) || null
 
@@ -98,13 +101,13 @@ function AssignmentsAndEmail({ embedded = false }) {
       if (!activeProject) return { folders: [], releases: [] }
       const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`)
       const folders = response?.folders || []
-
+      
       // Extract releases (top-level folders) sorted descending by name
       const releases = folders
         .filter(item => item.type === 'folder')
         .map(folder => ({ id: folder.id, name: folder.name, contents: folder.contents }))
         .sort((a, b) => b.name.localeCompare(a.name))
-
+      
       return { folders, releases }
     },
     enabled: !!activeProject,
@@ -122,9 +125,9 @@ function AssignmentsAndEmail({ embedded = false }) {
     queryKey: ['historicalTesters', activeProject?.id],
     queryFn: async () => {
       if (!activeProject || folderReleases.length === 0) return []
-
+      
       const testerSet = new Set()
-
+      
       // Helper to get all scripts from folders
       const getAllScripts = (items) => {
         const scripts = []
@@ -137,10 +140,10 @@ function AssignmentsAndEmail({ embedded = false }) {
         }
         return scripts
       }
-
+      
       // Get all scripts from all folders
       const allScripts = getAllScripts(allFolders)
-
+      
       // Fetch scripts in batches to get tester info
       const MAX_CONCURRENT = 20
       for (let i = 0; i < allScripts.length; i += MAX_CONCURRENT) {
@@ -148,7 +151,7 @@ function AssignmentsAndEmail({ embedded = false }) {
         const results = await Promise.allSettled(
           batch.map(script => apiGet(`/api/v1/scripts/${script.id}`))
         )
-
+        
         results.forEach(result => {
           if (result.status === 'fulfilled' && result.value) {
             const scriptDetails = result.value?.script || result.value
@@ -156,8 +159,8 @@ function AssignmentsAndEmail({ embedded = false }) {
               scriptDetails.runs.forEach(run => {
                 // Extract from headers._tester
                 const testerFromHeaders = run.headers?._tester
-                if (testerFromHeaders && testerFromHeaders.includes('@') &&
-                  testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
+                if (testerFromHeaders && testerFromHeaders.includes('@') && 
+                    testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
                   testerSet.add(testerFromHeaders)
                 }
                 // Extract from assignee.email
@@ -180,7 +183,7 @@ function AssignmentsAndEmail({ embedded = false }) {
           }
         })
       }
-
+      
       return Array.from(testerSet).sort()
     },
     enabled: !!activeProject && folderReleases.length > 0 && allFolders.length > 0,
@@ -391,27 +394,56 @@ function AssignmentsAndEmail({ embedded = false }) {
   }, [allRuns])
 
   // Handlers
-  const toggleRunSelection = (runId) => {
+  const toggleRunSelection = (runId, runInfo = null) => {
     setSelectedRunIds(prev => {
       const newSet = new Set(prev)
       if (newSet.has(runId)) {
         newSet.delete(runId)
+        // Remove from cache
+        setSelectedRunsCache(prevCache => {
+          const newCache = { ...prevCache }
+          delete newCache[runId]
+          return newCache
+        })
       } else {
         newSet.add(runId)
+        // Add to cache if runInfo provided
+        if (runInfo) {
+          setSelectedRunsCache(prevCache => ({
+            ...prevCache,
+            [runId]: runInfo
+          }))
+        }
       }
       return newSet
     })
   }
 
   const selectAllNew = () => {
-    const newRunIds = filteredRuns
-      .filter(r => r.state === 'new')
-      .map(r => r.id)
-    setSelectedRunIds(new Set(newRunIds))
+    const newRuns = filteredRuns.filter(r => r.state === 'new')
+    const newRunIds = newRuns.map(r => r.id)
+    
+    // Add all to selection
+    setSelectedRunIds(prev => {
+      const newSet = new Set(prev)
+      newRunIds.forEach(id => newSet.add(id))
+      return newSet
+    })
+    
+    // Add all to cache
+    setSelectedRunsCache(prevCache => {
+      const newCache = { ...prevCache }
+      newRuns.forEach(run => {
+        newCache[run.id] = run
+      })
+      return newCache
+    })
   }
 
   const clearSelection = () => {
     setSelectedRunIds(new Set())
+    setSelectedRunsCache({})
+    setRunAssignments({})
   }
 
   const applyBulkTester = () => {
@@ -421,7 +453,8 @@ function AssignmentsAndEmail({ embedded = false }) {
     }
     const newAssignments = { ...runAssignments }
     selectedRunIds.forEach(runId => {
-      const run = allRuns.find(r => r.id === runId)
+      // Check in current runs OR in cache
+      const run = allRuns.find(r => r.id === runId) || selectedRunsCache[runId]
       if (run && run.state === 'new') {
         newAssignments[runId] = bulkTester
       }
@@ -439,7 +472,8 @@ function AssignmentsAndEmail({ embedded = false }) {
 
   const handleSendEmails = async () => {
     // Get runs that are selected AND have a tester assigned
-    const runsToSend = filteredRuns.filter(run =>
+    // Get runs to send from all selected (including cached from other releases)
+    const runsToSend = allSelectedRuns.filter(run =>
       selectedRunIds.has(run.id) &&
       run.state === 'new' &&
       runAssignments[run.id]
@@ -468,6 +502,12 @@ function AssignmentsAndEmail({ embedded = false }) {
           const newSet = new Set(prev)
           newSet.delete(run.id)
           return newSet
+        })
+        // Remove from cache
+        setSelectedRunsCache(prev => {
+          const newCache = { ...prev }
+          delete newCache[run.id]
+          return newCache
         })
         // Clear assignment
         setRunAssignments(prev => {
@@ -500,16 +540,41 @@ function AssignmentsAndEmail({ embedded = false }) {
     refetch()
   }
 
-  // Count ready to send
-  const readyToSendCount = filteredRuns.filter(run =>
+  // Combine current runs with cached selected runs (for counting across releases)
+  const allSelectedRuns = useMemo(() => {
+    const runsMap = {}
+    // First add cached runs
+    Object.values(selectedRunsCache).forEach(run => {
+      runsMap[run.id] = run
+    })
+    // Then add/update with current runs (more up-to-date)
+    allRuns.forEach(run => {
+      if (selectedRunIds.has(run.id)) {
+        runsMap[run.id] = run
+      }
+    })
+    return Object.values(runsMap)
+  }, [allRuns, selectedRunsCache, selectedRunIds])
+
+  // Count ready to send - from all selected runs (including cached from other releases)
+  const readyToSendCount = allSelectedRuns.filter(run =>
     selectedRunIds.has(run.id) &&
     run.state === 'new' &&
     runAssignments[run.id]
   ).length
 
-  const selectedNewCount = filteredRuns.filter(run =>
+  // Count selected new runs - from all selected (including cached)
+  const selectedNewCount = allSelectedRuns.filter(run =>
     selectedRunIds.has(run.id) && run.state === 'new'
   ).length
+
+  // Count visible selected (for UI feedback)
+  const visibleSelectedCount = filteredRuns.filter(run =>
+    selectedRunIds.has(run.id) && run.state === 'new'
+  ).length
+
+  // Total new runs across all (for reference)
+  const totalNewRuns = allRuns.filter(r => r.state === 'new').length
 
   // Render loading state
   if (isLoading && allRuns.length === 0) {
@@ -564,6 +629,7 @@ function AssignmentsAndEmail({ embedded = false }) {
             <Text strong>Project:</Text>
             <Select
               style={{ width: 180 }}
+              className={activeProject ? 'filter-active' : ''}
               value={activeProject?.id}
               onChange={(value) => {
                 const project = projects.find(p => p.id === value)
@@ -584,12 +650,12 @@ function AssignmentsAndEmail({ embedded = false }) {
             <Text strong>Release:</Text>
             <Select
               style={{ width: 180 }}
+              className={(effectiveReleaseId || selectedReleaseId) && (effectiveReleaseId || selectedReleaseId) !== 'all' ? 'filter-active' : ''}
               value={effectiveReleaseId || selectedReleaseId}
               onChange={(value) => {
                 setSelectedReleaseId(value)
                 setSelectedTestSuiteId('all')
-                setSelectedRunIds(new Set())
-                setRunAssignments({})
+                // DO NOT clear selections - keep them across filter changes
               }}
               showSearch
               filterOption={(input, option) =>
@@ -607,6 +673,7 @@ function AssignmentsAndEmail({ embedded = false }) {
             <Text strong>Test Suite:</Text>
             <Select
               style={{ width: 200 }}
+              className={selectedTestSuiteId && selectedTestSuiteId !== 'all' ? 'filter-active' : ''}
               value={selectedTestSuiteId}
               onChange={setSelectedTestSuiteId}
               showSearch
@@ -625,6 +692,7 @@ function AssignmentsAndEmail({ embedded = false }) {
             <Text strong>State:</Text>
             <Select
               style={{ width: 180 }}
+              className={stateFilter && stateFilter !== 'all' ? 'filter-active' : ''}
               value={stateFilter}
               onChange={setStateFilter}
             >
@@ -680,28 +748,16 @@ function AssignmentsAndEmail({ embedded = false }) {
             </span>
             <div>
               <div style={{ fontSize: 13, color: '#666', lineHeight: 1.2 }}>selected</div>
-              <div style={{ fontSize: 11, color: '#999' }}>of {filteredRuns.filter(r => r.state === 'new').length} new runs</div>
+              <div style={{ fontSize: 11, color: '#999' }}>
+                {selectedNewCount !== visibleSelectedCount ? `(${visibleSelectedCount} visible)` : `of ${totalNewRuns} new`}
+              </div>
             </div>
           </div>
 
-          {/* Selection actions */}
-          <div style={{ display: 'flex', gap: 8 }}>
-            {(() => {
-              const newRunsCount = filteredRuns.filter(r => r.state === 'new').length
-              const allNewSelected = selectedNewCount > 0 && selectedNewCount === newRunsCount
-              return (
-                <Button
-                  type={allNewSelected ? 'primary' : 'default'}
-                  onClick={() => allNewSelected ? clearSelection() : selectAllNew()}
-                >
-                  {allNewSelected ? 'Deselect All' : `Select All New (${newRunsCount})`}
-                </Button>
-              )
-            })()}
-            {selectedNewCount > 0 && (
-              <Button onClick={clearSelection}>Clear</Button>
-            )}
-          </div>
+          {/* Clear button only */}
+          {selectedNewCount > 0 && (
+            <Button onClick={clearSelection}>Clear ({selectedNewCount})</Button>
+          )}
 
           {/* Tester selector */}
           <Select
@@ -792,7 +848,7 @@ function AssignmentsAndEmail({ embedded = false }) {
                       {isNew ? (
                         <Checkbox
                           checked={isSelected}
-                          onChange={() => toggleRunSelection(run.id)}
+                          onChange={() => toggleRunSelection(run.id, run)}
                         />
                       ) : (
                         <Tooltip title={run.state === 'started' ? 'Already started - cannot reassign' : 'Already completed'}>
@@ -938,7 +994,10 @@ function AssignmentsAndEmail({ embedded = false }) {
           <div>
             <div style={{ fontSize: 14, color: '#333' }}>
               <strong style={{ color: '#1890ff', fontSize: 16 }}>{selectedNewCount}</strong>
-              <span style={{ color: '#666' }}> of {filteredRuns.filter(r => r.state === 'new').length} selected</span>
+              <span style={{ color: '#666' }}> selected total</span>
+              {selectedNewCount !== visibleSelectedCount && (
+                <span style={{ color: '#999', fontSize: 12 }}> ({visibleSelectedCount} visible)</span>
+              )}
             </div>
             <div style={{ fontSize: 13, color: '#52c41a', marginTop: 4 }}>
               <CheckCircleOutlined style={{ marginRight: 4 }} />

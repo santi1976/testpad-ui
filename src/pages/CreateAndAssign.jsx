@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Layout, Typography, Card, Button, Select, Space, Tag, Avatar,
+  Layout, Typography, Card, Button, Select, Space, Tag, Avatar, 
   Alert, Row, Col, message, Empty, Table, Divider,
   Steps, Input, AutoComplete, Checkbox, Tooltip
 } from 'antd'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  ArrowLeftOutlined, PlusOutlined, CheckOutlined, SendOutlined,
+import { 
+  ArrowLeftOutlined, PlusOutlined, CheckOutlined, SendOutlined, 
   SearchOutlined, CloseOutlined
 } from '@ant-design/icons'
 import { apiGet } from '../utils/api'
@@ -29,10 +29,10 @@ async function createRunAPI(scriptId) {
       const userData = JSON.parse(storedUser)
       if (userData.apiToken) token = userData.apiToken
     }
-  } catch (e) { }
+  } catch (e) {}
   if (!token) token = import.meta.env.VITE_TESTPAD_API_TOKEN
   if (!token) throw new Error('API token not found')
-
+  
   const response = await fetch(`/api/v1/scripts/${scriptId}/runs`, {
     method: 'POST',
     headers: {
@@ -64,28 +64,28 @@ function getInitials(email) {
 function CreateAndAssign({ embedded = false }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-
+  
   // State for project/folder selection
   const [selectedProject, setSelectedProject] = useState(null)
   const [selectedFolder, setSelectedFolder] = useState(null)
-
+  
   // State for script selection
   const [selectedScriptIds, setSelectedScriptIds] = useState(new Set())
   const [scriptSearchTerm, setScriptSearchTerm] = useState('')
-
+  
   // State for created runs
   const [createdRuns, setCreatedRuns] = useState([])
-
+  
   // State for assignment
   const [runAssignments, setRunAssignments] = useState({})
   const [pendingAssignments, setPendingAssignments] = useState({})
   const [assigningRunId, setAssigningRunId] = useState(null)
   const [quickAssignTester, setQuickAssignTester] = useState('')
   const [isQuickAssigning, setIsQuickAssigning] = useState(false)
-
+  
   // State for current step
   const [currentStep, setCurrentStep] = useState(0)
-
+  
   // Load projects
   const { data: projectsData } = useQuery({
     queryKey: ['projects'],
@@ -124,7 +124,7 @@ function CreateAndAssign({ embedded = false }) {
     }
   }, [selectedProject, folders, selectedFolder])
 
-  // Collect all scripts
+  // Collect all scripts with folder info
   const allScripts = useMemo(() => {
     function collectScripts(items, parentFolder = null) {
       const scripts = []
@@ -140,14 +140,69 @@ function CreateAndAssign({ embedded = false }) {
     return collectScripts(folders)
   }, [folders])
 
-  // Filter scripts by search
+  // Get the latest release ID (first folder)
+  const latestReleaseId = folders.length > 0 ? folders[0].id : null
+
+  // State for release filter - null means "latest" (will be set when folders load)
+  const [selectedReleaseFilter, setSelectedReleaseFilter] = useState(null)
+
+  // Auto-select latest release when folders load
+  useEffect(() => {
+    if (folders.length > 0 && selectedReleaseFilter === null) {
+      setSelectedReleaseFilter(folders[0].id)
+    }
+  }, [folders, selectedReleaseFilter])
+
+  // Filter scripts by selected release
+  const scriptsFilteredByRelease = useMemo(() => {
+    if (selectedReleaseFilter === 'all') return allScripts
+    
+    const targetFolderId = selectedReleaseFilter || latestReleaseId
+    
+    return allScripts.filter(script => script.folder?.id === targetFolderId)
+  }, [allScripts, selectedReleaseFilter, latestReleaseId])
+
+  // Fetch run counts for scripts (to show "→ Run #X")
+  const { data: scriptRunCounts } = useQuery({
+    queryKey: ['scriptRunCounts', selectedProject?.id, selectedReleaseFilter],
+    queryFn: async () => {
+      if (!selectedProject || scriptsFilteredByRelease.length === 0) return {}
+      
+      const counts = {}
+      const MAX_CONCURRENT = 20
+      
+      for (let i = 0; i < scriptsFilteredByRelease.length; i += MAX_CONCURRENT) {
+        const batch = scriptsFilteredByRelease.slice(i, i + MAX_CONCURRENT)
+        const results = await Promise.allSettled(
+          batch.map(script => apiGet(`/api/v1/scripts/${script.id}`))
+        )
+        
+        results.forEach((result, idx) => {
+          const script = batch[idx]
+          if (result.status === 'fulfilled' && result.value) {
+            const scriptData = result.value?.script || result.value
+            const runsCount = scriptData.runs?.length || 0
+            counts[script.id] = runsCount + 1 // Next run number
+          } else {
+            counts[script.id] = 1
+          }
+        })
+      }
+      
+      return counts
+    },
+    enabled: !!selectedProject && scriptsFilteredByRelease.length > 0,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Filter scripts by search (after release filter)
   const filteredScripts = useMemo(() => {
-    if (!scriptSearchTerm) return allScripts
+    if (!scriptSearchTerm) return scriptsFilteredByRelease
     const term = scriptSearchTerm.toLowerCase()
-    return allScripts.filter(script =>
+    return scriptsFilteredByRelease.filter(script => 
       script.name.toLowerCase().includes(term) || script.id.toString().includes(term)
     )
-  }, [allScripts, scriptSearchTerm])
+  }, [scriptsFilteredByRelease, scriptSearchTerm])
 
   // Selected scripts array
   const selectedScripts = useMemo(() => {
@@ -160,13 +215,13 @@ function CreateAndAssign({ embedded = false }) {
     queryFn: async () => {
       if (projects.length === 0) return []
       const testerSet = new Set()
-
+      
       // Process all projects to extract testers
       for (const project of projects) {
         try {
           const foldersResponse = await apiGet(`/api/v1/projects/${project.id}/folders`)
           const foldersData = foldersResponse?.folders || []
-
+          
           const collectScripts = (items) => {
             const scripts = []
             for (const item of items) {
@@ -177,21 +232,21 @@ function CreateAndAssign({ embedded = false }) {
             }
             return scripts
           }
-
+          
           const scripts = collectScripts(foldersData) // No limit - get all scripts
-
+          
           const scriptResults = await Promise.allSettled(
             scripts.map(async (script) => {
               const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
               return scriptData
             })
           )
-
+          
           scriptResults.forEach(result => {
             if (result.status === 'fulfilled' && result.value) {
               const scriptDetails = result.value?.script || result.value
               const runs = scriptDetails?.runs || []
-
+              
               runs.forEach(run => {
                 // Extract from headers._tester
                 const testerFromHeaders = run.headers?._tester
@@ -220,7 +275,7 @@ function CreateAndAssign({ embedded = false }) {
           console.warn(`Error fetching project ${project.id}:`, error)
         }
       }
-
+      
       return Array.from(testerSet).sort()
     },
     enabled: projects.length > 0,
@@ -230,17 +285,17 @@ function CreateAndAssign({ embedded = false }) {
   // Extract users - combine from allTesters + current assignments
   const users = useMemo(() => {
     const userSet = new Set()
-
+    
     // Add all testers from global cache
     if (allTestersData && Array.isArray(allTestersData)) {
       allTestersData.forEach(email => userSet.add(email))
     }
-
+    
     // Add testers from current assignments
     Object.values(runAssignments).forEach(email => {
       if (email && email.includes('@')) userSet.add(email)
     })
-
+    
     return Array.from(userSet).sort()
   }, [allTestersData, runAssignments])
 
@@ -252,33 +307,49 @@ function CreateAndAssign({ embedded = false }) {
         try {
           const run = await createRunAPI(scriptId)
           const script = allScripts.find(s => s.id === scriptId)
-          return { ...run, scriptId, scriptName: script?.name || `Script ${scriptId}`, status: 'success' }
+          return { 
+            ...run, 
+            scriptId, 
+            scriptName: script?.name || `Script ${scriptId}`,
+            projectName: selectedProject?.name || 'Unknown Project',
+            folderName: script?.folder?.name || null,
+            folderId: script?.folder?.id || null,
+            status: 'success' 
+          }
         } catch (error) {
           const script = allScripts.find(s => s.id === scriptId)
-          return { scriptId, scriptName: script?.name || `Script ${scriptId}`, status: 'error', error: error.message }
+          return { 
+            scriptId, 
+            scriptName: script?.name || `Script ${scriptId}`,
+            projectName: selectedProject?.name || 'Unknown Project',
+            folderName: script?.folder?.name || null,
+            folderId: script?.folder?.id || null,
+            status: 'error', 
+            error: error.message 
+          }
         }
       })
-
+      
       const results = await Promise.allSettled(runPromises)
       results.forEach((result) => {
         if (result.status === 'fulfilled') runs.push(result.value)
       })
-
+      
       return runs
     },
     onSuccess: (runs) => {
       setCreatedRuns(runs)
       setCurrentStep(1)
-
+      
       const successCount = runs.filter(r => r.status === 'success').length
       const errorCount = runs.filter(r => r.status === 'error').length
-
+      
       if (successCount > 0) {
         message.success(`${successCount} run(s) created${errorCount > 0 ? `, ${errorCount} failed` : ''}`)
       } else {
         message.error(`Failed to create runs`)
       }
-
+      
       queryClient.invalidateQueries(['allRuns'])
     },
     onError: (error) => {
@@ -302,14 +373,14 @@ function CreateAndAssign({ embedded = false }) {
     }
 
     setAssigningRunId(runId)
-
+    
     try {
       await assignAndSendEmail(scriptId, runId, testerEmail, scriptName)
       // Mark email as sent in localStorage with recipient
       markEmailSent(scriptId, runId, testerEmail)
       setRunAssignments(prev => ({ ...prev, [runId]: testerEmail }))
       setPendingAssignments(prev => { const u = { ...prev }; delete u[runId]; return u })
-      setCreatedRuns(prevRuns =>
+      setCreatedRuns(prevRuns => 
         prevRuns.map(r => (r.id || r._id) === runId ? { ...r, assignedTo: testerEmail, emailSent: true } : r)
       )
       message.success(`Invitation sent to ${testerEmail}`)
@@ -326,10 +397,10 @@ function CreateAndAssign({ embedded = false }) {
       return
     }
 
-    const unassignedRuns = createdRuns.filter(r =>
+    const unassignedRuns = createdRuns.filter(r => 
       r.status === 'success' && !runAssignments[r.id || r._id]
     )
-
+    
     if (unassignedRuns.length === 0) {
       message.info('All runs already assigned')
       return
@@ -345,11 +416,11 @@ function CreateAndAssign({ embedded = false }) {
         // Mark email as sent in localStorage with recipient
         markEmailSent(run.scriptId, runId, quickAssignTester)
         setRunAssignments(prev => ({ ...prev, [runId]: quickAssignTester }))
-        setCreatedRuns(prevRuns =>
+        setCreatedRuns(prevRuns => 
           prevRuns.map(r => (r.id || r._id) === runId ? { ...r, assignedTo: quickAssignTester, emailSent: true } : r)
         )
         successCount++
-      } catch (error) { }
+      } catch (error) {}
     }
 
     setIsQuickAssigning(false)
@@ -394,6 +465,37 @@ function CreateAndAssign({ embedded = false }) {
       title: 'Test Suite',
       dataIndex: 'scriptName',
       key: 'scriptName',
+      render: (name, record) => (
+        <div>
+          <div style={{ fontWeight: 500, marginBottom: 4 }}>{name}</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {record.projectName && (
+              <Tag style={{
+                margin: 0,
+                fontSize: 10,
+                padding: '0 6px',
+                background: '#f0f5ff',
+                color: '#2f54eb',
+                border: '1px solid #adc6ff'
+              }}>
+                {record.projectName}
+              </Tag>
+            )}
+            {record.folderName && (
+              <Tag style={{
+                margin: 0,
+                fontSize: 10,
+                padding: '0 6px',
+                background: record.folderId === latestReleaseId ? '#f6ffed' : '#fff7e6',
+                color: record.folderId === latestReleaseId ? '#389e0d' : '#d48806',
+                border: `1px solid ${record.folderId === latestReleaseId ? '#b7eb8f' : '#ffe58f'}`
+              }}>
+                {record.folderId === latestReleaseId ? '✓ ' : ''}{record.folderName}
+              </Tag>
+            )}
+          </div>
+        </div>
+      ),
     },
     {
       title: 'Status',
@@ -404,7 +506,7 @@ function CreateAndAssign({ embedded = false }) {
         const isAssigned = runAssignments[runId] || record.assignedTo
         const emailWasSent = record.emailSent || hasEmailSent(record.scriptId, runId)
         const emailRecipient = emailWasSent ? getEmailRecipient(record.scriptId, runId) : null
-
+        
         if (emailWasSent) {
           return (
             <Space direction="vertical" size={0}>
@@ -418,7 +520,7 @@ function CreateAndAssign({ embedded = false }) {
             </Space>
           )
         }
-
+        
         return isAssigned ? (
           <Tag color="green" icon={<CheckOutlined />}>Sent</Tag>
         ) : (
@@ -501,7 +603,7 @@ function CreateAndAssign({ embedded = false }) {
 
       {/* Step 0: Select Scripts */}
       {currentStep === 0 && (
-        <Card
+        <Card 
           title="Step 1: Select Scripts to Create Runs"
           size="small"
         >
@@ -513,11 +615,13 @@ function CreateAndAssign({ embedded = false }) {
                 <Select
                   placeholder="Select project"
                   style={{ width: 160 }}
+                  className={selectedProject ? 'filter-active' : ''}
                   value={selectedProject?.id}
                   onChange={(value) => {
                     const project = projects.find(p => p.id === value)
                     setSelectedProject(project || null)
                     setSelectedFolder(null)
+                    setSelectedReleaseFilter(null)
                     setSelectedScriptIds(new Set())
                   }}
                   size="middle"
@@ -530,19 +634,21 @@ function CreateAndAssign({ embedded = false }) {
             </Col>
             <Col>
               <Space>
-                <Text strong>Version:</Text>
+                <Text strong>Release:</Text>
                 <Select
-                  placeholder="Select version"
-                  style={{ width: 180 }}
-                  value={selectedFolder?.id}
+                  placeholder="Select release"
+                  style={{ width: 200 }}
+                  className={selectedReleaseFilter && selectedReleaseFilter !== 'all' ? 'filter-active' : ''}
+                  value={selectedReleaseFilter}
                   onChange={(value) => {
-                    const folder = folders.find(f => f.id === value)
-                    setSelectedFolder(folder || null)
+                    setSelectedReleaseFilter(value)
+                    setSelectedScriptIds(new Set())
                   }}
                   loading={foldersLoading}
                   disabled={!selectedProject || foldersLoading}
                   size="middle"
                 >
+                  <Option value="all">All Releases</Option>
                   {folders.map((folder, index) => (
                     <Option key={folder.id} value={folder.id}>
                       <Space size={4}>
@@ -560,22 +666,22 @@ function CreateAndAssign({ embedded = false }) {
           <Row gutter={16}>
             {/* Left: Available Scripts */}
             <Col span={12}>
-              <div style={{
-                border: '1px solid #d9d9d9',
+              <div style={{ 
+                border: '1px solid #d9d9d9', 
                 borderRadius: 6,
                 overflow: 'hidden'
               }}>
                 {/* Header */}
-                <div style={{
-                  padding: '8px 12px',
-                  background: '#fafafa',
+                <div style={{ 
+                  padding: '8px 12px', 
+                  background: '#fafafa', 
                   borderBottom: '1px solid #d9d9d9',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center'
                 }}>
                   <Space>
-                    <Checkbox
+                    <Checkbox 
                       indeterminate={selectedScriptIds.size > 0 && selectedScriptIds.size < filteredScripts.length}
                       checked={selectedScriptIds.size === filteredScripts.length && filteredScripts.length > 0}
                       onChange={(e) => e.target.checked ? selectAllScripts() : clearAllScripts()}
@@ -589,17 +695,31 @@ function CreateAndAssign({ embedded = false }) {
                   </Space>
                   <Button type="link" size="small" onClick={selectAllScripts}>Select All</Button>
                 </div>
-
-                {/* Search */}
-                <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                
+                {/* Search - Prominent */}
+                <div style={{ 
+                  padding: '14px', 
+                  background: 'linear-gradient(135deg, #f0f7ff 0%, #e6f4ff 100%)',
+                  borderBottom: '1px solid #91d5ff'
+                }}>
                   <Input
-                    placeholder="Search scripts..."
-                    prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+                    placeholder="🔍 Search test suites..."
+                    prefix={<SearchOutlined style={{ color: '#1890ff', fontSize: 16 }} />}
                     value={scriptSearchTerm}
                     onChange={(e) => setScriptSearchTerm(e.target.value)}
                     allowClear
-                    size="middle"
+                    size="large"
+                    style={{ 
+                      border: '2px solid #91d5ff',
+                      borderRadius: 8,
+                      fontSize: 15
+                    }}
                   />
+                  {scriptSearchTerm && (
+                    <div style={{ marginTop: 10, fontSize: 13, color: '#1890ff' }}>
+                      Showing <strong>{filteredScripts.length}</strong> of {scriptsFilteredByRelease.length} scripts matching "{scriptSearchTerm}"
+                    </div>
+                  )}
                 </div>
 
                 {/* List */}
@@ -609,6 +729,9 @@ function CreateAndAssign({ embedded = false }) {
                   ) : (
                     filteredScripts.map(script => {
                       const isSelected = selectedScriptIds.has(script.id)
+                      const isLatestRelease = script.folder?.id === latestReleaseId
+                      const nextRunNumber = scriptRunCounts?.[script.id] || 1
+                      
                       return (
                         <div
                           key={script.id}
@@ -616,8 +739,6 @@ function CreateAndAssign({ embedded = false }) {
                           style={{
                             padding: '10px 12px',
                             cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
                             borderBottom: '1px solid #f5f5f5',
                             backgroundColor: isSelected ? '#e6f7ff' : '#fff',
                             transition: 'background 0.2s'
@@ -625,9 +746,46 @@ function CreateAndAssign({ embedded = false }) {
                           onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = '#fafafa' }}
                           onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = '#fff' }}
                         >
-                          <Checkbox checked={isSelected} style={{ marginRight: 10 }} />
-                          <Text style={{ flex: 1 }}>{script.name}</Text>
-                          <Text type="secondary" style={{ fontSize: 11 }}>ID: {script.id}</Text>
+                          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                            <Checkbox checked={isSelected} style={{ marginRight: 10, marginTop: 2 }} />
+                            <div style={{ flex: 1 }}>
+                              {/* First line: Name + Release tag + Next Run */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                <Text strong style={{ fontSize: 14 }}>{script.name}</Text>
+                                {isLatestRelease ? (
+                                  <Tag style={{
+                                    margin: 0,
+                                    fontSize: 10,
+                                    padding: '0 6px',
+                                    background: '#f6ffed',
+                                    color: '#389e0d',
+                                    border: '1px solid #b7eb8f'
+                                  }}>
+                                    ✓ {script.folder?.name || 'Latest'}
+                                  </Tag>
+                                ) : (
+                                  <Tag style={{
+                                    margin: 0,
+                                    fontSize: 10,
+                                    padding: '0 6px',
+                                    background: '#fff7e6',
+                                    color: '#d48806',
+                                    border: '1px solid #ffe58f'
+                                  }}>
+                                    {script.folder?.name || 'Unknown'}
+                                  </Tag>
+                                )}
+                                <Text style={{ color: '#1890ff', fontWeight: 500, fontSize: 11 }}>
+                                  Will create Run #{nextRunNumber}
+                                </Text>
+                              </div>
+                              {/* Second line: Project (subtle) */}
+                              <div style={{ fontSize: 11, color: '#999' }}>
+                                {selectedProject?.name || 'Unknown Project'}
+                              </div>
+                            </div>
+                            <Text type="secondary" style={{ fontSize: 10 }}>ID: {script.id}</Text>
+                          </div>
                         </div>
                       )
                     })
@@ -638,16 +796,16 @@ function CreateAndAssign({ embedded = false }) {
 
             {/* Right: Selected Scripts */}
             <Col span={12}>
-              <div style={{
-                border: '1px solid #b7eb8f',
+              <div style={{ 
+                border: '1px solid #b7eb8f', 
                 borderRadius: 6,
                 overflow: 'hidden',
                 backgroundColor: selectedScripts.length > 0 ? '#f6ffed' : '#fff'
               }}>
                 {/* Header */}
-                <div style={{
-                  padding: '8px 12px',
-                  background: selectedScripts.length > 0 ? '#d9f7be' : '#fafafa',
+                <div style={{ 
+                  padding: '8px 12px', 
+                  background: selectedScripts.length > 0 ? '#d9f7be' : '#fafafa', 
                   borderBottom: '1px solid #b7eb8f',
                   display: 'flex',
                   justifyContent: 'space-between',
@@ -667,34 +825,72 @@ function CreateAndAssign({ embedded = false }) {
                   {selectedScripts.length === 0 ? (
                     <Empty description="Click scripts on the left to add" style={{ marginTop: 40 }} />
                   ) : (
-                    selectedScripts.map(script => (
-                      <div
-                        key={script.id}
-                        style={{
-                          padding: '10px 12px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          borderBottom: '1px solid #f0f0f0',
-                          borderLeft: '3px solid #52c41a'
-                        }}
-                      >
-                        <CheckOutlined style={{ color: '#52c41a', marginRight: 10 }} />
-                        <Text style={{ flex: 1 }}>{script.name}</Text>
-                        <Tooltip title="Remove">
-                          <CloseOutlined
-                            style={{ color: '#ff4d4f', cursor: 'pointer' }}
-                            onClick={() => toggleScript(script.id)}
-                          />
-                        </Tooltip>
-                      </div>
-                    ))
+                    selectedScripts.map(script => {
+                      const isLatestRelease = script.folder?.id === latestReleaseId
+                      const nextRunNumber = scriptRunCounts?.[script.id] || 1
+                      
+                      return (
+                        <div
+                          key={script.id}
+                          style={{
+                            padding: '10px 12px',
+                            borderBottom: '1px solid #f0f0f0',
+                            borderLeft: '3px solid #52c41a'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                            <CheckOutlined style={{ color: '#52c41a', marginRight: 10, marginTop: 4 }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                                <Text strong>{script.name}</Text>
+                                {isLatestRelease ? (
+                                  <Tag style={{
+                                    margin: 0,
+                                    fontSize: 10,
+                                    padding: '0 6px',
+                                    background: '#f6ffed',
+                                    color: '#389e0d',
+                                    border: '1px solid #b7eb8f'
+                                  }}>
+                                    ✓ {script.folder?.name}
+                                  </Tag>
+                                ) : (
+                                  <Tag style={{
+                                    margin: 0,
+                                    fontSize: 10,
+                                    padding: '0 6px',
+                                    background: '#fff7e6',
+                                    color: '#d48806',
+                                    border: '1px solid #ffe58f'
+                                  }}>
+                                    {script.folder?.name}
+                                  </Tag>
+                                )}
+                                <Text style={{ color: '#1890ff', fontWeight: 500, fontSize: 11 }}>
+                                  Will create Run #{nextRunNumber}
+                                </Text>
+                              </div>
+                              <div style={{ fontSize: 11, color: '#999' }}>
+                                {selectedProject?.name}
+                              </div>
+                            </div>
+                            <Tooltip title="Remove">
+                              <CloseOutlined 
+                                style={{ color: '#ff4d4f', cursor: 'pointer', marginTop: 4 }}
+                                onClick={() => toggleScript(script.id)}
+                              />
+                            </Tooltip>
+                          </div>
+                        </div>
+                      )
+                    })
                   )}
                 </div>
 
                 {/* Summary */}
-                <div style={{
-                  padding: '12px',
-                  background: '#e6f7ff',
+                <div style={{ 
+                  padding: '12px', 
+                  background: '#e6f7ff', 
                   borderTop: '1px solid #91d5ff'
                 }}>
                   <Text strong>{selectedScripts.length} scripts selected</Text>
@@ -724,7 +920,7 @@ function CreateAndAssign({ embedded = false }) {
 
       {/* Step 1: Assign & Send */}
       {currentStep === 1 && (
-        <Card
+        <Card 
           title={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>Step 2: Assign Testers & Send Invitations</span>
@@ -732,7 +928,7 @@ function CreateAndAssign({ embedded = false }) {
                 <Tag color={assignedCount === totalSuccessRuns ? 'green' : 'orange'}>
                   {assignedCount} / {totalSuccessRuns} assigned
                 </Tag>
-                <Button
+                <Button 
                   size="small"
                   onClick={() => {
                     setCurrentStep(0)

@@ -18,11 +18,11 @@ function formatElapsedTime(created) {
     const start = new Date(created)
     const now = new Date()
     const diff = Math.floor((now - start) / 1000) // difference in seconds
-
+    
     const hours = Math.floor(diff / 3600)
     const minutes = Math.floor((diff % 3600) / 60)
     const seconds = diff % 60
-
+    
     if (hours > 0) {
       return `${hours}h ${minutes}m`
     } else if (minutes > 0) {
@@ -49,14 +49,14 @@ function getInitials(email) {
 function getTestsWithIssues(run) {
   const issues = []
   if (!run.results || !run.tests) return issues
-
+  
   Object.entries(run.results).forEach(([testId, result]) => {
     const status = result?.result || result
     if (status === 'fail' || status === 'block' || status === 'failed' || status === 'blocked') {
       // Find the test by ID
       const test = run.tests.find(t => String(t.id) === String(testId))
       const testIndex = run.tests.findIndex(t => String(t.id) === String(testId))
-
+      
       if (test) {
         issues.push({
           id: testId,
@@ -67,7 +67,7 @@ function getTestsWithIssues(run) {
       }
     }
   })
-
+  
   // Sort by test number
   issues.sort((a, b) => a.number - b.number)
   return issues
@@ -97,7 +97,7 @@ function Dashboard() {
   const [progressiveRuns, setProgressiveRuns] = useState([])
   const [isLoadingProgressive, setIsLoadingProgressive] = useState(false)
   const [error, setError] = useState(null)
-
+  
   // Cache key for localStorage
   const getCacheKey = () => {
     const projectId = selectedProject?.id || 'all'
@@ -114,7 +114,7 @@ function Dashboard() {
   const projects = projectsData?.projects || []
 
   // Compute activeProject (same pattern as AssignmentsAndEmail)
-  const activeProject = selectedProject || projects.find(p =>
+  const activeProject = selectedProject || projects.find(p => 
     p.name.toLowerCase().includes('testpad api testing')
   ) || null
 
@@ -122,7 +122,7 @@ function Dashboard() {
   useEffect(() => {
     if (projects.length > 0 && !selectedProject && !hasManuallySelectedProject) {
       // Select the last project (most recent) - or find "Testpad Api Testing" as fallback
-      const testpadApiProject = projects.find(p =>
+      const testpadApiProject = projects.find(p => 
         p.name.toLowerCase().includes('testpad api testing')
       )
       // Prefer "Testpad Api Testing" if found, otherwise select the last project
@@ -140,13 +140,13 @@ function Dashboard() {
       if (!activeProject) return { folders: [], releases: [] }
       const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`)
       const folders = response?.folders || []
-
+      
       // Extract releases (top-level folders) sorted descending by name
       const releases = folders
         .filter(item => item.type === 'folder')
         .map(folder => ({ id: folder.id, name: folder.name, contents: folder.contents }))
         .sort((a, b) => b.name.localeCompare(a.name))
-
+      
       return { folders, releases }
     },
     enabled: !!activeProject,
@@ -161,9 +161,9 @@ function Dashboard() {
     queryKey: ['historicalTesters', activeProject?.id],
     queryFn: async () => {
       if (!activeProject || folderReleases.length === 0) return []
-
+      
       const testerSet = new Set()
-
+      
       // Helper to get all scripts from folders
       const getAllScripts = (items) => {
         const scripts = []
@@ -176,10 +176,10 @@ function Dashboard() {
         }
         return scripts
       }
-
+      
       // Get all scripts from all folders
       const allScripts = getAllScripts(allFoldersData)
-
+      
       // Fetch scripts in batches to get tester info
       const MAX_CONCURRENT = 20
       for (let i = 0; i < allScripts.length; i += MAX_CONCURRENT) {
@@ -187,7 +187,7 @@ function Dashboard() {
         const results = await Promise.allSettled(
           batch.map(script => apiGet(`/api/v1/scripts/${script.id}`))
         )
-
+        
         results.forEach(result => {
           if (result.status === 'fulfilled' && result.value) {
             const scriptDetails = result.value?.script || result.value
@@ -195,8 +195,8 @@ function Dashboard() {
               scriptDetails.runs.forEach(run => {
                 // Extract from headers._tester
                 const testerFromHeaders = run.headers?._tester
-                if (testerFromHeaders && testerFromHeaders.includes('@') &&
-                  testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
+                if (testerFromHeaders && testerFromHeaders.includes('@') && 
+                    testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
                   testerSet.add(testerFromHeaders)
                 }
                 // Extract from assignee.email
@@ -219,7 +219,7 @@ function Dashboard() {
           }
         })
       }
-
+      
       return Array.from(testerSet).sort()
     },
     enabled: !!activeProject && folderReleases.length > 0 && allFoldersData.length > 0,
@@ -255,14 +255,14 @@ function Dashboard() {
     let pass = 0
     let fail = 0
     let block = 0
-
+    
     // Count results by status
     Object.values(results).forEach(result => {
       if (result === 'pass' || result === 'passed') pass++
       else if (result === 'fail' || result === 'failed') fail++
       else if (result === 'block' || result === 'blocked') block++
     })
-
+    
     return {
       total,
       pass,
@@ -275,19 +275,19 @@ function Dashboard() {
   // Progressive loading: fetch runs and update state as they arrive
   useEffect(() => {
     let cancelled = false
-
+    
     const loadRuns = async () => {
       // Wait for activeProject and releaseToLoad
       if (!activeProject || !releaseToLoad) {
         return
       }
-
+      
       setIsLoadingProgressive(true)
-
+      
       // Clear old cache format
       const oldCacheKey = `dashboard_runs_${activeProject?.id}`
       localStorage.removeItem(oldCacheKey)
-
+      
       try {
         // Check cache first
         const cacheKey = getCacheKey()
@@ -297,7 +297,7 @@ function Dashboard() {
             const { data, timestamp } = JSON.parse(cached)
             const cacheAge = Date.now() - timestamp
             const maxAge = 5 * 60 * 1000 // 5 minutes
-
+            
             if (cacheAge < maxAge && data.length > 0) {
               // Use cached data immediately
               if (!cancelled) {
@@ -311,10 +311,10 @@ function Dashboard() {
             // Invalid cache, continue to fetch
           }
         }
-
+        
         const allRuns = []
         const MAX_CONCURRENT_SCRIPTS = 30
-
+        
         // Helper to get ALL scripts from a folder (recursive)
         const getScriptsFromFolder = (folder, parentFolder = null) => {
           const scripts = []
@@ -330,7 +330,7 @@ function Dashboard() {
           }
           return scripts
         }
-
+        
         // Helper to get ALL scripts with their parent folder (for 'all' mode)
         const getAllScriptsWithFolder = (items, parentFolder = null) => {
           const scripts = []
@@ -343,7 +343,7 @@ function Dashboard() {
           }
           return scripts
         }
-
+        
         // Get scripts to fetch based on release selection
         let scriptsWithFolders = []
         if (releaseToLoad === 'all') {
@@ -351,11 +351,11 @@ function Dashboard() {
         } else {
           scriptsWithFolders = getScriptsFromFolder(releaseToLoad)
         }
-
+        
         // Process scripts in batches
         for (let i = 0; i < scriptsWithFolders.length; i += MAX_CONCURRENT_SCRIPTS) {
           if (cancelled) break
-
+          
           const batch = scriptsWithFolders.slice(i, i + MAX_CONCURRENT_SCRIPTS)
           const results = await Promise.allSettled(
             batch.map(async ({ script, folder }) => {
@@ -363,12 +363,12 @@ function Dashboard() {
               return { script, folder, scriptData }
             })
           )
-
+          
           results.forEach((result) => {
             if (result.status === 'fulfilled' && result.value) {
               const { script, folder, scriptData } = result.value
               const scriptDetails = scriptData?.script || scriptData
-
+              
               if (scriptDetails.runs && Array.isArray(scriptDetails.runs) && scriptDetails.runs.length > 0) {
                 scriptDetails.runs.forEach(run => {
                   let userInfo = null
@@ -376,7 +376,7 @@ function Dashboard() {
                   const isGuestByTester = testerEmail && (testerEmail.toLowerCase() === 'guest')
                   const isGuestByAssignee = run.assignee?.id === '_guest' || run.assignee?.id === '0' || run.assignee?.name === 'guest'
                   const isGuestRun = isGuestByTester || isGuestByAssignee
-
+                  
                   if (isGuestRun) {
                     let guestEmail = null
                     if (run.assignee?.email && run.assignee.email.includes('@')) {
@@ -399,7 +399,7 @@ function Dashboard() {
                         guestEmail = parts[1]
                       }
                     }
-
+                    
                     if (guestEmail && guestEmail.includes('@')) {
                       userInfo = {
                         email: guestEmail,
@@ -433,7 +433,7 @@ function Dashboard() {
                       }
                     }
                   }
-
+                  
                   allRuns.push({
                     ...run,
                     id: run.id || run.headers?._run || `run-${Math.random()}`,
@@ -451,18 +451,18 @@ function Dashboard() {
               }
             }
           })
-
+          
           // Update progress after each batch
           if (!cancelled && allRuns.length > 0) {
             setProgressiveRuns([...allRuns])
           }
         }
-
+        
         if (!cancelled) {
           setProgressiveRuns(allRuns)
           setIsLoadingProgressive(false)
           setError(null)
-
+          
           // Save to cache
           const cacheKey = getCacheKey()
           localStorage.setItem(cacheKey, JSON.stringify({
@@ -477,9 +477,9 @@ function Dashboard() {
         }
       }
     }
-
+    
     loadRuns()
-
+    
     return () => {
       cancelled = true
     }
@@ -495,22 +495,22 @@ function Dashboard() {
     if (selectedProject) {
       const selectedId = Number(selectedProject.id)
       const runProjectId = Number(run.project.id)
-
+      
       if (isNaN(selectedId) || isNaN(runProjectId) || selectedId !== runProjectId) {
         return false
       }
     }
-
+    
     // Filter by user (skip if 'all')
     if (selectedUser && selectedUser !== 'all' && run.userInfo?.email !== selectedUser) {
       return false
     }
-
+    
     // Filter by test suite (script)
     if (selectedTestSuite && selectedTestSuite !== 'all' && run.script?.id !== selectedTestSuite) {
       return false
     }
-
+    
     // Filter by folder (release/version) - use effectiveFolderId to handle 'latest'
     // Skip filter if effectiveFolderId is still 'latest' (folders haven't loaded yet)
     if (effectiveFolderId && effectiveFolderId !== 'all' && effectiveFolderId !== 'latest') {
@@ -518,7 +518,7 @@ function Dashboard() {
         return false
       }
     }
-
+    
     // Filter by status
     if (selectedState !== 'all') {
       // ALWAYS calculate state from progress (API state can be wrong or use different naming)
@@ -528,22 +528,22 @@ function Dashboard() {
       const fail = progress.fail || 0
       const block = progress.block || 0
       const completedCount = pass + fail + block
-
+      
       let effectiveState = 'new'
       if (total > 0 && completedCount === total) {
         effectiveState = 'completed'
       } else if (completedCount > 0) {
         effectiveState = 'started'
       }
-
+      
       // Check for blocks/fails (issues)
       const hasIssues = block > 0 || fail > 0
-
+      
       if (selectedState === 'active' && effectiveState !== 'started') return false
       if (selectedState === 'completed' && effectiveState !== 'completed') return false
       if (selectedState === 'blocked' && !hasIssues) return false
     }
-
+    
     return true
   })
 
@@ -585,11 +585,11 @@ function Dashboard() {
     filteredRuns.forEach(run => {
       const scriptId = run.script?.id
       if (!scriptId) return
-
+      
       // If email is still 'guest', try to find it one more time
       if (selectedTestSuite && run.userInfo?.isGuest && (run.userInfo?.email === 'guest' || !run.userInfo?.email || run.userInfo.email === run.id)) {
         let guestEmail = null
-
+        
         // Check assignee.email first (this is where Testpad stores the guest email)
         if (run.assignee?.email && run.assignee.email.includes('@')) {
           guestEmail = run.assignee.email
@@ -606,12 +606,12 @@ function Dashboard() {
         } else if (run.data?.emailSentTo) {
           guestEmail = run.data.emailSentTo
         }
-
+        
         if (guestEmail && guestEmail.includes('@')) {
           run.userInfo.email = guestEmail
         }
       }
-
+      
       if (!grouped[scriptId]) {
         grouped[scriptId] = {
           script: run.script,
@@ -620,10 +620,10 @@ function Dashboard() {
           runs: []
         }
       }
-
+      
       grouped[scriptId].runs.push(run)
     })
-
+    
     // Sort runs within each script group (first/lowest run number first)
     Object.keys(grouped).forEach(scriptId => {
       grouped[scriptId].runs.sort((a, b) => {
@@ -633,14 +633,14 @@ function Dashboard() {
         if (aRunNum !== bRunNum) {
           return aRunNum - bRunNum // Ascending: run 1 < run 7 (run 1 first)
         }
-
+        
         // If run numbers are equal, sort by created date (older first)
         const aDate = new Date(a.created || 0)
         const bDate = new Date(b.created || 0)
         return aDate - bDate // Ascending: older date first
       })
     })
-
+    
     return grouped
   }, [filteredRuns, selectedTestSuite])
 
@@ -661,7 +661,7 @@ function Dashboard() {
     const selectedRuns = Object.values(runsByScript)
       .map(group => getSelectedRunForScript(group.script.id, group.runs))
       .filter(Boolean)
-
+    
     return {
       total: selectedRuns.length,
       active: selectedRuns.filter(r => r.state === 'started').length,
@@ -690,8 +690,8 @@ function Dashboard() {
   }
 
   // Get runs with critical alerts
-  const criticalRuns = filteredRuns.filter(run =>
-    (run.progress && run.progress.fail > 0) ||
+  const criticalRuns = filteredRuns.filter(run => 
+    (run.progress && run.progress.fail > 0) || 
     (run.progress && run.progress.block > 0)
   )
 
@@ -701,34 +701,34 @@ function Dashboard() {
       <Content style={{ padding: '24px', background: '#f5f5f5' }}>
         <div style={{ maxWidth: 1800, margin: '0 auto' }}>
           {/* Header */}
-          <div style={{
-            marginBottom: 24,
-            display: 'flex',
-            alignItems: 'center',
+          <div style={{ 
+            marginBottom: 24, 
+            display: 'flex', 
+            alignItems: 'center', 
             gap: 16,
             flexWrap: 'wrap'
           }}>
-            <Button
-              icon={<ArrowLeftOutlined />}
+            <Button 
+              icon={<ArrowLeftOutlined />} 
               onClick={() => navigate('/')}
               type="default"
               size="middle"
             >
               Back to Projects
             </Button>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
               gap: 16,
               flex: 1,
               minWidth: 0
             }}>
               <Title level={1} style={{ margin: 0, fontWeight: 700, fontSize: 28 }}>Test Runs Dashboard</Title>
-              <Button
+              <Button 
                 type="primary"
                 onClick={() => navigate('/test-executions')}
                 size="large"
-                style={{
+                style={{ 
                   height: 'auto',
                   paddingTop: 8,
                   paddingBottom: 8
@@ -809,14 +809,14 @@ function Dashboard() {
                   />
                 </div>
               </div>
-
+              
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
                 {criticalRuns.map((run, index) => {
                   const uniqueKey = `${run.project?.id || 'p'}-${run.script?.id || 's'}-${run.id || index}`
                   const displayName = run.userInfo?.isGuest && run.userInfo?.email && run.userInfo.email !== 'guest' && run.userInfo.email.includes('@')
                     ? `Guest (${run.userInfo.email.split('@')[0]})`
                     : run.userInfo?.email?.split('@')[0] || 'Unknown'
-
+                  
                   return (
                     <div
                       key={uniqueKey}
@@ -880,6 +880,7 @@ function Dashboard() {
                 <Select
                   placeholder="All projects"
                   style={{ width: 200 }}
+                  className={activeProject ? 'filter-active' : ''}
                   showSearch
                   filterOption={(input, option) =>
                     (option?.children?.toLowerCase() || '').includes(input.toLowerCase())
@@ -911,6 +912,7 @@ function Dashboard() {
                 <Text strong style={{ marginRight: 8 }}>User:</Text>
                 <Select
                   style={{ width: 200 }}
+                  className={selectedUser && selectedUser !== 'all' ? 'filter-active' : ''}
                   value={selectedUser}
                   onChange={setSelectedUser}
                   showSearch
@@ -932,6 +934,7 @@ function Dashboard() {
                 <Select
                   placeholder="All test suites"
                   style={{ width: 200 }}
+                  className={selectedTestSuite ? 'filter-active' : ''}
                   showSearch
                   filterOption={(input, option) =>
                     (option?.children?.toLowerCase() || '').includes(input.toLowerCase())
@@ -958,6 +961,7 @@ function Dashboard() {
                 <Select
                   placeholder="All folders"
                   style={{ width: 200 }}
+                  className={(effectiveFolderId || selectedFolder) && (effectiveFolderId || selectedFolder) !== 'all' ? 'filter-active' : ''}
                   showSearch
                   filterOption={(input, option) =>
                     (option?.children?.toLowerCase() || '').includes(input.toLowerCase())
@@ -986,6 +990,7 @@ function Dashboard() {
                 <Text strong style={{ marginRight: 8 }}>Status:</Text>
                 <Select
                   style={{ width: 160 }}
+                  className={selectedState && selectedState !== 'all' ? 'filter-active' : ''}
                   value={selectedState}
                   onChange={setSelectedState}
                 >
@@ -996,8 +1001,8 @@ function Dashboard() {
                 </Select>
               </div>
               <div>
-                <Button
-                  size="small"
+                <Button 
+                  size="small" 
                   onClick={() => {
                     setSelectedProject(null)
                     setSelectedUser('all')
@@ -1011,8 +1016,8 @@ function Dashboard() {
                 </Button>
               </div>
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-                <AppstoreOutlined
-                  style={{
+                <AppstoreOutlined 
+                  style={{ 
                     color: viewMode === 'grid' ? '#1890ff' : '#8c8c8c',
                     fontSize: '18px',
                     cursor: 'pointer',
@@ -1020,8 +1025,8 @@ function Dashboard() {
                   }}
                   onClick={() => setViewMode('grid')}
                 />
-                <BarsOutlined
-                  style={{
+                <BarsOutlined 
+                  style={{ 
                     color: viewMode === 'horizontal' ? '#1890ff' : '#8c8c8c',
                     fontSize: '18px',
                     cursor: 'pointer',
@@ -1043,7 +1048,7 @@ function Dashboard() {
                   <div style={{ marginTop: 16 }}>Loading runs from all projects...</div>
                 </div>
               )}
-
+              
               {/* Show loading indicator at bottom if still loading more */}
               {isLoadingProgressive && progressiveRuns.length > 0 && (
                 <div style={{ textAlign: 'center', padding: '20px' }}>
@@ -1062,9 +1067,9 @@ function Dashboard() {
                     <div>
                       <Text>{error?.message || 'An error occurred'}</Text>
                       <br />
-                      <Button
-                        type="link"
-                        size="small"
+                      <Button 
+                        type="link" 
+                        size="small" 
                         onClick={() => {
                           setError(null)
                           setProgressiveRuns([])
@@ -1102,11 +1107,11 @@ function Dashboard() {
               {(!isLoading || progressiveRuns.length > 0) && !error && (
                 <>
                   {filteredRuns.length === 0 ? (
-                    <Empty
+                    <Empty 
                       description={
                         <div>
                           <Text strong style={{ display: 'block', marginBottom: 8, fontSize: '16px' }}>
-                            {allRuns.length === 0
+                            {allRuns.length === 0 
                               ? "No runs found in the system"
                               : "No runs match the selected filters"}
                           </Text>
@@ -1147,13 +1152,13 @@ function Dashboard() {
                         const scriptId = scriptGroup.script.id
                         const runs = scriptGroup.runs
                         const isExpanded = expandedScripts[scriptId] || false
-
+                        
                         // Calculate aggregated totals for all runs
                         let totalPass = 0
                         let totalFail = 0
                         let totalBlock = 0
                         let totalTests = 0
-
+                        
                         runs.forEach(r => {
                           const p = r.progress || {}
                           totalPass += p.pass || 0
@@ -1161,11 +1166,11 @@ function Dashboard() {
                           totalBlock += p.block || 0
                           totalTests += p.total || 0
                         })
-
+                        
                         const totalPercentage = totalTests > 0 ? Math.round((totalPass / totalTests) * 100) : 0
                         const firstRun = runs[0]
                         if (!firstRun) return null
-
+                        
                         return (
                           <Card
                             key={`${firstRun.project?.id || 'p'}-${scriptId}`}
@@ -1188,8 +1193,8 @@ function Dashboard() {
                                   }}
                                   style={{ padding: 0, width: 24, height: 24 }}
                                 />
-                                <Text
-                                  strong
+                                <Text 
+                                  strong 
                                   style={{ fontSize: '16px', cursor: 'pointer' }}
                                   onClick={() => {
                                     navigate(`/test-suite/${scriptId}`, {
@@ -1207,7 +1212,7 @@ function Dashboard() {
                                 {totalPass}/{totalTests} {totalPercentage}%
                               </Tag>
                             </div>
-
+                            
                             {/* Summary bar: Pass, Fail, Blocked, Query */}
                             <div style={{ marginBottom: 16 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginBottom: 8 }}>
@@ -1243,7 +1248,7 @@ function Dashboard() {
                                 </Text>
                               </div>
                             </div>
-
+                            
                             {/* Expanded runs list */}
                             {isExpanded && (
                               <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
@@ -1254,7 +1259,7 @@ function Dashboard() {
                                   const runFail = progress.fail || 0
                                   const runBlock = progress.block || 0
                                   const runPercentage = runTotal > 0 ? Math.round((runPass / runTotal) * 100) : 0
-
+                                  
                                   let runState = run.state
                                   if (!runState) {
                                     if (runPercentage === 100) {
@@ -1265,7 +1270,7 @@ function Dashboard() {
                                       runState = 'new'
                                     }
                                   }
-
+                                  
                                   const formatDate = (dateStr) => {
                                     if (!dateStr) return 'N/A'
                                     try {
@@ -1275,7 +1280,7 @@ function Dashboard() {
                                       return 'N/A'
                                     }
                                   }
-
+                                  
                                   return (
                                     <div
                                       key={run.id || run.userInfo?.runNumber}
@@ -1357,15 +1362,15 @@ function Dashboard() {
                         const scriptId = scriptGroup.script.id
                         const runs = scriptGroup.runs
                         const run = getSelectedRunForScript(scriptId, runs)
-
+                        
                         if (!run) return null
-
+                        
                         const progress = run.progress || {}
                         const total = progress.total || 0
                         const passed = progress.pass || 0
                         const failed = progress.fail || 0
                         const blocked = progress.block || 0
-
+                        
                         // Calculate percentage (don't modify this number - it comes from the data)
                         // - If run is new/empty, show 0%
                         // - Otherwise, calculate based on passed/total
@@ -1375,7 +1380,7 @@ function Dashboard() {
                         } else {
                           percentage = 0
                         }
-
+                        
                         // ALWAYS determine state from percentage (API state can be wrong or use 'complete' vs 'completed')
                         let runState
                         if (percentage === 100) {
@@ -1387,7 +1392,7 @@ function Dashboard() {
                         }
                         // Update the run's state for display
                         run.state = runState
-
+                        
                         // Check if this script's card is selected (compare by scriptId, not run.id)
                         const isSelected = selectedRun?.script?.id === scriptId
                         const isActive = runState === 'started'
@@ -1414,319 +1419,319 @@ function Dashboard() {
                               >
                                 {/* Badge for alerts - show total issues count */}
                                 {hasIssues && (
-                                  <Badge.Ribbon
-                                    text={`${totalIssues} Issue${totalIssues > 1 ? 's' : ''}`}
+                                  <Badge.Ribbon 
+                                    text={`${totalIssues} Issue${totalIssues > 1 ? 's' : ''}`} 
                                     color={failed > 0 ? 'red' : 'orange'}
                                   />
                                 )}
 
-                                {/* Header with user */}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <Avatar
-                                      size="small"
-                                      style={{ backgroundColor: '#1890ff' }}
-                                      icon={<UserOutlined />}
-                                    >
-                                      {getInitials(run.userInfo?.email)}
-                                    </Avatar>
-                                    <div>
-                                      <Text strong style={{ fontSize: '12px', display: 'block' }}>
-                                        {run.userInfo?.isGuest && run.userInfo?.email && run.userInfo.email !== 'guest' && run.userInfo.email.includes('@')
-                                          ? `Guest (${run.userInfo.email.split('@')[0]})`
-                                          : run.userInfo?.email?.split('@')[0] || 'Unknown'}
-                                      </Text>
-                                      <Text type="secondary" style={{ fontSize: '11px' }}>
-                                        {run.project.name}
-                                        {run.folder && ` / ${run.folder.name}`}
-                                      </Text>
-                                    </div>
-                                  </div>
-                                  {(() => {
-                                    const emailWasSent = hasEmailSent(run.script.id, run.id)
-                                    const isNew = run.state === 'new' || runState === 'new'
-
-                                    if (isNew && emailWasSent) {
-                                      const emailRecipient = getEmailRecipient(run.script.id, run.id)
-                                      return (
-                                        <Space direction="vertical" size={0} align="end">
-                                          <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: '11px' }}>
-                                            Email Sent
-                                          </Tag>
-                                          {emailRecipient && (
-                                            <Text type="secondary" style={{ fontSize: '10px', display: 'block', marginTop: 2 }}>
-                                              To: {emailRecipient.split('@')[0]}
-                                            </Text>
-                                          )}
-                                          <Tag color="orange" style={{ fontSize: '9px', marginTop: 2 }}>
-                                            Status: NEW
-                                          </Tag>
-                                        </Space>
-                                      )
-                                    }
-
-                                    return (
-                                      <Tag color={getStateColor(run)} icon={getStateIcon(run)} style={{ fontSize: '11px' }}>
-                                        {run.state || 'unknown'}
-                                      </Tag>
-                                    )
-                                  })()}
-                                </div>
-
-                                {/* Test Suite with Run Selector */}
-                                <div style={{ marginBottom: 12 }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <Text
-                                      strong
-                                      style={{
-                                        fontSize: '13px',
-                                        cursor: 'pointer',
-                                        color: '#1890ff'
-                                      }}
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        navigate(`/test-suite/${run.script.id}`, {
-                                          state: {
-                                            project: run.project,
-                                            folder: null
-                                          }
-                                        })
-                                      }}
-                                    >
-                                      {run.script.name}
-                                    </Text>
-                                    {runs.length > 1 && (
-                                      <Select
-                                        size="small"
-                                        value={run.id || run.userInfo?.runNumber}
-                                        style={{ width: 100, fontSize: '11px' }}
-                                        onClick={(e) => e.stopPropagation()}
-                                        onChange={(value) => {
-                                          setSelectedRunByScript(prev => ({
-                                            ...prev,
-                                            [scriptId]: value
-                                          }))
-                                        }}
-                                        popupMatchSelectWidth={false}
-                                      >
-                                        {runs.map((r) => (
-                                          <Option key={r.id || r.userInfo?.runNumber} value={r.id || r.userInfo?.runNumber}>
-                                            Run #{r.userInfo?.runNumber || r.id} {r.userInfo?.email ? (
-                                              r.userInfo?.isGuest && r.userInfo.email !== 'guest' && r.userInfo.email.includes('@')
-                                                ? `(Guest - ${r.userInfo.email.split('@')[0]})`
-                                                : `(${r.userInfo.email.split('@')[0]})`
-                                            ) : ''}
-                                          </Option>
-                                        ))}
-                                      </Select>
-                                    )}
-                                  </div>
-                                  {runs.length > 1 && (
-                                    <Text type="secondary" style={{ fontSize: '10px' }}>
-                                      {runs.length} run(s) available
-                                    </Text>
-                                  )}
-                                </div>
-
-                                {/* Progreso compacto */}
-                                <div style={{ marginBottom: 12 }}>
-                                  <Progress
-                                    percent={percentage}
+                              {/* Header with user */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <Avatar 
                                     size="small"
-                                    strokeColor={{
-                                      '0%': '#108ee9',
-                                      '100%': '#87d068',
-                                    }}
-                                    format={() => `${percentage}%`}
-                                  />
-                                </div>
-
-                                {/* Contadores compactos */}
-                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-                                  {passed > 0 && <Tag color="green" style={{ margin: 0, fontSize: '10px' }}>✓ {passed}</Tag>}
-                                  {failed > 0 && <Tag color="red" style={{ margin: 0, fontSize: '10px' }}>✗ {failed}</Tag>}
-                                  {blocked > 0 && <Tag color="orange" style={{ margin: 0, fontSize: '10px' }}>⚠ {blocked}</Tag>}
-                                  <Tag style={{ margin: 0, fontSize: '10px' }}>{total}</Tag>
-                                </div>
-
-                                {/* Time - only show if no issues, with extra height to match issues button */}
-                                {!hasIssues && (
-                                  <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 12, paddingBottom: 12 }}>
+                                    style={{ backgroundColor: '#1890ff' }}
+                                    icon={<UserOutlined />}
+                                  >
+                                    {getInitials(run.userInfo?.email)}
+                                  </Avatar>
+                                  <div>
+                                    <Text strong style={{ fontSize: '12px', display: 'block' }}>
+                                      {run.userInfo?.isGuest && run.userInfo?.email && run.userInfo.email !== 'guest' && run.userInfo.email.includes('@')
+                                        ? `Guest (${run.userInfo.email.split('@')[0]})`
+                                        : run.userInfo?.email?.split('@')[0] || 'Unknown'}
+                                    </Text>
                                     <Text type="secondary" style={{ fontSize: '11px' }}>
-                                      ⏱️ {formatElapsedTime(run.created)}
+                                      {run.project.name}
+                                      {run.folder && ` / ${run.folder.name}`}
                                     </Text>
                                   </div>
-                                )}
+                                </div>
+                                {(() => {
+                                  const emailWasSent = hasEmailSent(run.script.id, run.id)
+                                  const isNew = run.state === 'new' || runState === 'new'
+                                  
+                                  if (isNew && emailWasSent) {
+                                    const emailRecipient = getEmailRecipient(run.script.id, run.id)
+                                    return (
+                                      <Space direction="vertical" size={0} align="end">
+                                        <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: '11px' }}>
+                                          Email Sent
+                                        </Tag>
+                                        {emailRecipient && (
+                                          <Text type="secondary" style={{ fontSize: '10px', display: 'block', marginTop: 2 }}>
+                                            To: {emailRecipient.split('@')[0]}
+                                          </Text>
+                                        )}
+                                        <Tag color="orange" style={{ fontSize: '9px', marginTop: 2 }}>
+                                          Status: NEW
+                                        </Tag>
+                                      </Space>
+                                    )
+                                  }
+                                  
+                                  return (
+                                    <Tag color={getStateColor(run)} icon={getStateIcon(run)} style={{ fontSize: '11px' }}>
+                                      {run.state || 'unknown'}
+                                    </Tag>
+                                  )
+                                })()}
+                              </div>
 
-                                {/* Issues expand button */}
-                                {hasIssues && (
-                                  <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                                    <Button
-                                      size="middle"
-                                      type={issuesExpanded ? 'primary' : 'default'}
-                                      danger={failed > 0}
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        setExpandedIssues(prev => ({
+                              {/* Test Suite with Run Selector */}
+                              <div style={{ marginBottom: 12 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                  <Text 
+                                    strong 
+                                    style={{ 
+                                      fontSize: '13px', 
+                                      cursor: 'pointer',
+                                      color: '#1890ff'
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      navigate(`/test-suite/${run.script.id}`, {
+                                        state: {
+                                          project: run.project,
+                                          folder: null
+                                        }
+                                      })
+                                    }}
+                                  >
+                                    {run.script.name}
+                                  </Text>
+                                  {runs.length > 1 && (
+                                    <Select
+                                      size="small"
+                                      value={run.id || run.userInfo?.runNumber}
+                                      style={{ width: 100, fontSize: '11px' }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(value) => {
+                                        setSelectedRunByScript(prev => ({
                                           ...prev,
-                                          [scriptId]: !prev[scriptId]
+                                          [scriptId]: value
                                         }))
                                       }}
-                                      style={{
-                                        width: '100%',
-                                        fontSize: '13px',
-                                        fontWeight: 600,
-                                        height: 36,
-                                        overflow: 'hidden',
-                                        whiteSpace: 'nowrap',
-                                        textOverflow: 'ellipsis',
-                                      }}
+                                      popupMatchSelectWidth={false}
                                     >
-                                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                                        <WarningOutlined />
-                                        <span>{totalIssues} Issue{totalIssues > 1 ? 's' : ''}</span>
-                                        <span style={{ opacity: 0.85 }}>
-                                          ({failed > 0 ? `${failed}F` : ''}{failed > 0 && blocked > 0 ? '/' : ''}{blocked > 0 ? `${blocked}B` : ''})
-                                        </span>
-                                        {issuesExpanded ? <UpOutlined /> : <DownOutlined />}
-                                      </span>
-                                    </Button>
-                                  </div>
+                                      {runs.map((r) => (
+                                        <Option key={r.id || r.userInfo?.runNumber} value={r.id || r.userInfo?.runNumber}>
+                                          Run #{r.userInfo?.runNumber || r.id} {r.userInfo?.email ? (
+                                            r.userInfo?.isGuest && r.userInfo.email !== 'guest' && r.userInfo.email.includes('@')
+                                              ? `(Guest - ${r.userInfo.email.split('@')[0]})`
+                                              : `(${r.userInfo.email.split('@')[0]})`
+                                          ) : ''}
+                                        </Option>
+                                      ))}
+                                    </Select>
+                                  )}
+                                </div>
+                                {runs.length > 1 && (
+                                  <Text type="secondary" style={{ fontSize: '10px' }}>
+                                    {runs.length} run(s) available
+                                  </Text>
                                 )}
-                              </Card>
+                              </div>
 
-                              {/* Click-outside overlay to close panel */}
-                              {hasIssues && issuesExpanded && (
-                                <div
-                                  style={{
-                                    position: 'fixed',
-                                    top: 0,
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 0,
-                                    zIndex: 99,
+                              {/* Progreso compacto */}
+                              <div style={{ marginBottom: 12 }}>
+                                <Progress
+                                  percent={percentage}
+                                  size="small"
+                                  strokeColor={{
+                                    '0%': '#108ee9',
+                                    '100%': '#87d068',
                                   }}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setExpandedIssues(prev => ({ ...prev, [scriptId]: false }))
-                                  }}
+                                  format={() => `${percentage}%`}
                                 />
-                              )}
+                              </div>
 
-                              {/* Floating issues panel - always rendered for smooth animation */}
-                              {hasIssues && (
-                                <div
-                                  style={{
-                                    position: 'absolute',
-                                    top: '100%',
-                                    left: 0,
-                                    right: 0,
-                                    zIndex: 100,
-                                    background: 'white',
-                                    border: issuesExpanded ? '1px solid #ffccc7' : '1px solid transparent',
-                                    borderRadius: '0 0 8px 8px',
-                                    boxShadow: issuesExpanded ? '0 4px 12px rgba(0,0,0,0.15)' : 'none',
-                                    marginTop: -1,
-                                    maxHeight: issuesExpanded ? 250 : 0,
-                                    opacity: issuesExpanded ? 1 : 0,
-                                    overflow: 'hidden',
-                                    transition: 'max-height 0.25s ease-out, opacity 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out',
-                                    pointerEvents: issuesExpanded ? 'auto' : 'none'
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  {/* Header with summary */}
-                                  <div style={{
-                                    padding: '8px 12px',
-                                    background: failed > 0 ? '#fff1f0' : '#fff7e6',
-                                    borderBottom: '1px solid #f0f0f0',
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center'
-                                  }}>
-                                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                                      {failed > 0 && (
-                                        <Text style={{ fontSize: '11px', color: '#ff4d4f' }}>
-                                          <span style={{
-                                            display: 'inline-block',
-                                            width: 8,
-                                            height: 8,
-                                            borderRadius: '50%',
-                                            background: '#ff4d4f',
-                                            marginRight: 4
-                                          }}></span>
-                                          {failed} Failed
-                                        </Text>
-                                      )}
-                                      {blocked > 0 && (
-                                        <Text style={{ fontSize: '11px', color: '#faad14' }}>
-                                          <span style={{
-                                            display: 'inline-block',
-                                            width: 8,
-                                            height: 8,
-                                            borderRadius: '50%',
-                                            background: '#faad14',
-                                            marginRight: 4
-                                          }}></span>
-                                          {blocked} Blocked
-                                        </Text>
-                                      )}
-                                    </div>
-                                    <Button
-                                      type="link"
-                                      size="small"
-                                      style={{ fontSize: '11px', padding: 0 }}
-                                      onClick={() => {
-                                        setSelectedRun(run)
-                                        setExpandedIssues(prev => ({ ...prev, [scriptId]: false }))
-                                      }}
-                                    >
-                                      See all in panel →
-                                    </Button>
-                                  </div>
+                              {/* Contadores compactos */}
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+                                {passed > 0 && <Tag color="green" style={{ margin: 0, fontSize: '10px' }}>✓ {passed}</Tag>}
+                                {failed > 0 && <Tag color="red" style={{ margin: 0, fontSize: '10px' }}>✗ {failed}</Tag>}
+                                {blocked > 0 && <Tag color="orange" style={{ margin: 0, fontSize: '10px' }}>⚠ {blocked}</Tag>}
+                                <Tag style={{ margin: 0, fontSize: '10px' }}>{total}</Tag>
+                              </div>
 
-                                  {/* Issues list - show max 4 preview */}
-                                  <div style={{ padding: '8px 12px', maxHeight: 180, overflowY: 'auto' }}>
-                                    {testsWithIssues.slice(0, 4).map((issue) => (
-                                      <div
-                                        key={issue.id}
-                                        style={{
-                                          padding: '6px 8px',
-                                          marginBottom: 6,
-                                          background: issue.status === 'fail' ? '#fff1f0' : '#fff7e6',
-                                          borderRadius: 4,
-                                          borderLeft: `3px solid ${issue.status === 'fail' ? '#ff4d4f' : '#faad14'}`,
-                                          display: 'flex',
-                                          alignItems: 'flex-start',
-                                          gap: 8
-                                        }}
-                                      >
-                                        <Tag
-                                          color={issue.status === 'fail' ? 'red' : 'orange'}
-                                          style={{ margin: 0, fontSize: '10px', flexShrink: 0 }}
-                                        >
-                                          #{issue.number}
-                                        </Tag>
-                                        <Text style={{ fontSize: '11px', lineHeight: 1.4 }}>
-                                          {issue.text.length > 80 ? issue.text.substring(0, 80) + '...' : issue.text}
-                                        </Text>
-                                      </div>
-                                    ))}
-                                    {testsWithIssues.length > 4 && (
-                                      <div style={{
-                                        textAlign: 'center',
-                                        padding: '8px',
-                                        borderTop: '1px dashed #f0f0f0',
-                                        marginTop: 4
-                                      }}>
-                                        <Text type="secondary" style={{ fontSize: '11px' }}>
-                                          +{testsWithIssues.length - 4} more issue{testsWithIssues.length - 4 > 1 ? 's' : ''}
-                                        </Text>
-                                      </div>
-                                    )}
-                                  </div>
+                              {/* Time - only show if no issues, with extra height to match issues button */}
+                              {!hasIssues && (
+                                <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 12, paddingBottom: 12 }}>
+                                  <Text type="secondary" style={{ fontSize: '11px' }}>
+                                    ⏱️ {formatElapsedTime(run.created)}
+                                  </Text>
                                 </div>
                               )}
+
+                              {/* Issues expand button */}
+                              {hasIssues && (
+                                <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                                  <Button
+                                    size="middle"
+                                    type={issuesExpanded ? 'primary' : 'default'}
+                                    danger={failed > 0}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setExpandedIssues(prev => ({
+                                        ...prev,
+                                        [scriptId]: !prev[scriptId]
+                                      }))
+                                    }}
+                                    style={{ 
+                                      width: '100%', 
+                                      fontSize: '13px',
+                                      fontWeight: 600,
+                                      height: 36,
+                                      overflow: 'hidden',
+                                      whiteSpace: 'nowrap',
+                                      textOverflow: 'ellipsis',
+                                    }}
+                                  >
+                                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                      <WarningOutlined />
+                                      <span>{totalIssues} Issue{totalIssues > 1 ? 's' : ''}</span>
+                                      <span style={{ opacity: 0.85 }}>
+                                        ({failed > 0 ? `${failed}F` : ''}{failed > 0 && blocked > 0 ? '/' : ''}{blocked > 0 ? `${blocked}B` : ''})
+                                      </span>
+                                      {issuesExpanded ? <UpOutlined /> : <DownOutlined />}
+                                    </span>
+                                  </Button>
+                                </div>
+                              )}
+                            </Card>
+
+                            {/* Click-outside overlay to close panel */}
+                            {hasIssues && issuesExpanded && (
+                              <div 
+                                style={{
+                                  position: 'fixed',
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  zIndex: 99,
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setExpandedIssues(prev => ({ ...prev, [scriptId]: false }))
+                                }}
+                              />
+                            )}
+
+                            {/* Floating issues panel - always rendered for smooth animation */}
+                            {hasIssues && (
+                              <div 
+                                style={{
+                                  position: 'absolute',
+                                  top: '100%',
+                                  left: 0,
+                                  right: 0,
+                                  zIndex: 100,
+                                  background: 'white',
+                                  border: issuesExpanded ? '1px solid #ffccc7' : '1px solid transparent',
+                                  borderRadius: '0 0 8px 8px',
+                                  boxShadow: issuesExpanded ? '0 4px 12px rgba(0,0,0,0.15)' : 'none',
+                                  marginTop: -1,
+                                  maxHeight: issuesExpanded ? 250 : 0,
+                                  opacity: issuesExpanded ? 1 : 0,
+                                  overflow: 'hidden',
+                                  transition: 'max-height 0.25s ease-out, opacity 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out',
+                                  pointerEvents: issuesExpanded ? 'auto' : 'none'
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {/* Header with summary */}
+                                <div style={{ 
+                                  padding: '8px 12px', 
+                                  background: failed > 0 ? '#fff1f0' : '#fff7e6',
+                                  borderBottom: '1px solid #f0f0f0',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center'
+                                }}>
+                                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                                    {failed > 0 && (
+                                      <Text style={{ fontSize: '11px', color: '#ff4d4f' }}>
+                                        <span style={{ 
+                                          display: 'inline-block', 
+                                          width: 8, 
+                                          height: 8, 
+                                          borderRadius: '50%', 
+                                          background: '#ff4d4f',
+                                          marginRight: 4
+                                        }}></span>
+                                        {failed} Failed
+                                      </Text>
+                                    )}
+                                    {blocked > 0 && (
+                                      <Text style={{ fontSize: '11px', color: '#faad14' }}>
+                                        <span style={{ 
+                                          display: 'inline-block', 
+                                          width: 8, 
+                                          height: 8, 
+                                          borderRadius: '50%', 
+                                          background: '#faad14',
+                                          marginRight: 4
+                                        }}></span>
+                                        {blocked} Blocked
+                                      </Text>
+                                    )}
+                                  </div>
+                                  <Button 
+                                    type="link" 
+                                    size="small" 
+                                    style={{ fontSize: '11px', padding: 0 }}
+                                    onClick={() => {
+                                      setSelectedRun(run)
+                                      setExpandedIssues(prev => ({ ...prev, [scriptId]: false }))
+                                    }}
+                                  >
+                                    See all in panel →
+                                  </Button>
+                                </div>
+
+                                {/* Issues list - show max 4 preview */}
+                                <div style={{ padding: '8px 12px', maxHeight: 180, overflowY: 'auto' }}>
+                                  {testsWithIssues.slice(0, 4).map((issue) => (
+                                    <div 
+                                      key={issue.id}
+                                      style={{
+                                        padding: '6px 8px',
+                                        marginBottom: 6,
+                                        background: issue.status === 'fail' ? '#fff1f0' : '#fff7e6',
+                                        borderRadius: 4,
+                                        borderLeft: `3px solid ${issue.status === 'fail' ? '#ff4d4f' : '#faad14'}`,
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: 8
+                                      }}
+                                    >
+                                      <Tag 
+                                        color={issue.status === 'fail' ? 'red' : 'orange'} 
+                                        style={{ margin: 0, fontSize: '10px', flexShrink: 0 }}
+                                      >
+                                        #{issue.number}
+                                      </Tag>
+                                      <Text style={{ fontSize: '11px', lineHeight: 1.4 }}>
+                                        {issue.text.length > 80 ? issue.text.substring(0, 80) + '...' : issue.text}
+                                      </Text>
+                                    </div>
+                                  ))}
+                                  {testsWithIssues.length > 4 && (
+                                    <div style={{ 
+                                      textAlign: 'center', 
+                                      padding: '8px',
+                                      borderTop: '1px dashed #f0f0f0',
+                                      marginTop: 4
+                                    }}>
+                                      <Text type="secondary" style={{ fontSize: '11px' }}>
+                                        +{testsWithIssues.length - 4} more issue{testsWithIssues.length - 4 > 1 ? 's' : ''}
+                                      </Text>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                             </div>
                           </Col>
                         )
@@ -1743,8 +1748,8 @@ function Dashboard() {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                     <Title level={4} style={{ margin: 0 }}>Run Details</Title>
-                    <Text
-                      type="secondary"
+                    <Text 
+                      type="secondary" 
                       style={{ cursor: 'pointer', fontSize: '12px' }}
                       onClick={() => setSelectedRun(null)}
                     >
@@ -1757,7 +1762,7 @@ function Dashboard() {
                   {/* User Information */}
                   <Card size="small" style={{ marginBottom: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                      <Avatar
+                      <Avatar 
                         style={{ backgroundColor: '#1890ff' }}
                         icon={<UserOutlined />}
                       >
@@ -1785,9 +1790,9 @@ function Dashboard() {
                     <Text strong style={{ fontSize: '12px', display: 'block', marginBottom: 8 }}>
                       Test Suite
                     </Text>
-                    <Text
-                      style={{
-                        fontSize: '14px',
+                    <Text 
+                      style={{ 
+                        fontSize: '14px', 
                         cursor: 'pointer',
                         color: '#1890ff'
                       }}
@@ -1813,16 +1818,16 @@ function Dashboard() {
                       <Text strong style={{ fontSize: '14px', display: 'block', marginBottom: 16 }}>
                         Progress
                       </Text>
-
+                      
                       {/* Circular Progress - Centered */}
                       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
                         <Progress
                           type="circle"
                           percent={
-                            selectedRun.state === 'completed'
-                              ? 100
-                              : selectedRun.progress?.total > 0
-                                ? Math.round((selectedRun.progress.pass / selectedRun.progress.total) * 100)
+                            selectedRun.state === 'completed' 
+                              ? 100 
+                              : selectedRun.progress?.total > 0 
+                                ? Math.round((selectedRun.progress.pass / selectedRun.progress.total) * 100) 
                                 : 0
                           }
                           size={120}
@@ -1831,10 +1836,10 @@ function Dashboard() {
                             '100%': '#87d068',
                           }}
                           format={() => {
-                            const percent = selectedRun.state === 'completed'
-                              ? 100
-                              : selectedRun.progress?.total > 0
-                                ? Math.round((selectedRun.progress.pass / selectedRun.progress.total) * 100)
+                            const percent = selectedRun.state === 'completed' 
+                              ? 100 
+                              : selectedRun.progress?.total > 0 
+                                ? Math.round((selectedRun.progress.pass / selectedRun.progress.total) * 100) 
                                 : 0
                             return `${percent}%`
                           }}
@@ -1842,15 +1847,15 @@ function Dashboard() {
                       </div>
 
                       {/* Statistics Grid */}
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
+                      <div style={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: '1fr 1fr', 
                         gap: 12,
                         marginBottom: 16
                       }}>
-                        <div style={{
-                          padding: '12px',
-                          backgroundColor: '#f5f5f5',
+                        <div style={{ 
+                          padding: '12px', 
+                          backgroundColor: '#f5f5f5', 
                           borderRadius: '4px',
                           textAlign: 'center'
                         }}>
@@ -1861,9 +1866,9 @@ function Dashboard() {
                             {selectedRun.progress.total || 0}
                           </Text>
                         </div>
-                        <div style={{
-                          padding: '12px',
-                          backgroundColor: '#f6ffed',
+                        <div style={{ 
+                          padding: '12px', 
+                          backgroundColor: '#f6ffed', 
                           borderRadius: '4px',
                           textAlign: 'center',
                           border: '1px solid #b7eb8f'
@@ -1878,9 +1883,9 @@ function Dashboard() {
                         {(selectedRun.progress.fail > 0 || selectedRun.progress.block > 0) && (
                           <>
                             {selectedRun.progress.fail > 0 && (
-                              <div style={{
-                                padding: '12px',
-                                backgroundColor: '#fff1f0',
+                              <div style={{ 
+                                padding: '12px', 
+                                backgroundColor: '#fff1f0', 
                                 borderRadius: '4px',
                                 textAlign: 'center',
                                 border: '1px solid #ffccc7'
@@ -1894,9 +1899,9 @@ function Dashboard() {
                               </div>
                             )}
                             {selectedRun.progress.block > 0 && (
-                              <div style={{
-                                padding: '12px',
-                                backgroundColor: '#fff7e6',
+                              <div style={{ 
+                                padding: '12px', 
+                                backgroundColor: '#fff7e6', 
                                 borderRadius: '4px',
                                 textAlign: 'center',
                                 border: '1px solid #ffe58f'
@@ -1914,9 +1919,9 @@ function Dashboard() {
                       </div>
 
                       {/* Summary Line */}
-                      <div style={{
-                        padding: '10px 12px',
-                        backgroundColor: '#fafafa',
+                      <div style={{ 
+                        padding: '10px 12px', 
+                        backgroundColor: '#fafafa', 
                         borderRadius: '4px',
                         border: '1px solid #e8e8e8'
                       }}>
@@ -1933,9 +1938,9 @@ function Dashboard() {
 
                   {/* Tests with Issues - NEW SECTION */}
                   {selectedRun.progress && (selectedRun.progress.fail > 0 || selectedRun.progress.block > 0) && (
-                    <Card
-                      size="small"
-                      style={{
+                    <Card 
+                      size="small" 
+                      style={{ 
                         marginBottom: 16,
                         background: selectedRun.progress.fail > 0 ? '#fff1f0' : '#fff7e6',
                         border: `1px solid ${selectedRun.progress.fail > 0 ? '#ffccc7' : '#ffe58f'}`
@@ -1951,11 +1956,11 @@ function Dashboard() {
                       <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
                         {selectedRun.progress.fail > 0 && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{
-                              display: 'inline-block',
-                              width: 10,
-                              height: 10,
-                              borderRadius: '50%',
+                            <span style={{ 
+                              display: 'inline-block', 
+                              width: 10, 
+                              height: 10, 
+                              borderRadius: '50%', 
                               background: '#ff4d4f'
                             }}></span>
                             <Text style={{ fontSize: '12px' }}>{selectedRun.progress.fail} Failed</Text>
@@ -1963,11 +1968,11 @@ function Dashboard() {
                         )}
                         {selectedRun.progress.block > 0 && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{
-                              display: 'inline-block',
-                              width: 10,
-                              height: 10,
-                              borderRadius: '50%',
+                            <span style={{ 
+                              display: 'inline-block', 
+                              width: 10, 
+                              height: 10, 
+                              borderRadius: '50%', 
                               background: '#faad14'
                             }}></span>
                             <Text style={{ fontSize: '12px' }}>{selectedRun.progress.block} Blocked</Text>
@@ -1978,7 +1983,7 @@ function Dashboard() {
                       {/* Issues list */}
                       <div style={{ maxHeight: 250, overflowY: 'auto' }}>
                         {getTestsWithIssues(selectedRun).map((issue) => (
-                          <div
+                          <div 
                             key={issue.id}
                             style={{
                               padding: '8px 10px',
@@ -1991,8 +1996,8 @@ function Dashboard() {
                               gap: 10
                             }}
                           >
-                            <Tag
-                              color={issue.status === 'fail' ? 'red' : 'orange'}
+                            <Tag 
+                              color={issue.status === 'fail' ? 'red' : 'orange'} 
                               style={{ margin: 0, fontSize: '11px', flexShrink: 0 }}
                             >
                               #{issue.number} {issue.status === 'fail' ? 'FAIL' : 'BLOCK'}
@@ -2011,9 +2016,9 @@ function Dashboard() {
 
                       {/* Link to details */}
                       <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                        <Button
-                          type="link"
-                          size="small"
+                        <Button 
+                          type="link" 
+                          size="small" 
                           style={{ padding: 0, fontSize: '12px' }}
                           onClick={() => navigate(`/test-suite/${selectedRun.script.id}`, {
                             state: {
@@ -2074,7 +2079,7 @@ function Dashboard() {
                                   {index + 1}. {test.name || test.text || 'Test Case without name'}
                                 </Text>
                                 {test.status && (
-                                  <Tag
+                                  <Tag 
                                     color={test.status === 'pass' ? 'green' : test.status === 'fail' ? 'red' : 'default'}
                                     style={{ fontSize: '10px', marginLeft: 8 }}
                                   >
