@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   Layout, Typography, Card, Button, Select, Space, Tag, Avatar,
-  Spin, Alert, message, Empty, Row, Col, Checkbox, Tooltip, Divider
+  Spin, Alert, message, Empty, Row, Col, Checkbox, Tooltip, Divider, Modal, Collapse
 } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   MailOutlined, WarningOutlined, CheckCircleOutlined,
-  ClockCircleOutlined, SendOutlined, InfoCircleOutlined
+  ClockCircleOutlined, SendOutlined, InfoCircleOutlined, DownOutlined, UpOutlined
 } from '@ant-design/icons'
 import { apiGet } from '../utils/api'
 import { assignAndSendEmail } from '../api/assignAndSendEmail'
@@ -15,6 +15,7 @@ import { markEmailSent, hasEmailSent, getEmailRecipient } from '../utils/emailTr
 const { Content } = Layout
 const { Title, Text } = Typography
 const { Option } = Select
+const { Panel } = Collapse
 
 // Get initials from email
 function getInitials(email) {
@@ -54,13 +55,17 @@ function AssignmentsAndEmail({ embedded = false }) {
   const [selectedRunIds, setSelectedRunIds] = useState(new Set())
   const [runAssignments, setRunAssignments] = useState({}) // runId -> email
   const [bulkTester, setBulkTester] = useState(null)
-  
+
   // Cache of selected runs info (persists across release changes)
   const [selectedRunsCache, setSelectedRunsCache] = useState({}) // runId -> run info
 
   // Loading states
   const [sendingEmails, setSendingEmails] = useState(false)
   const [sendingRunIds, setSendingRunIds] = useState(new Set())
+
+  // UI states for summary panel and confirmation modal
+  const [summaryPanelOpen, setSummaryPanelOpen] = useState(false)
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false)
 
   // Load projects (for dropdown, but don't block on this)
   const { data: projectsData } = useQuery({
@@ -87,10 +92,10 @@ function AssignmentsAndEmail({ embedded = false }) {
 
   // Known default project - start loading immediately without waiting for projects list
   const DEFAULT_PROJECT_NAME = 'Testpad Api Testing'
-  
+
   // Use selectedProject if set, otherwise create a temporary object for the default
   // This allows folders query to start immediately
-  const activeProject = selectedProject || (projects.find(p => 
+  const activeProject = selectedProject || (projects.find(p =>
     p.name.toLowerCase().includes('testpad api testing')
   )) || null
 
@@ -101,13 +106,13 @@ function AssignmentsAndEmail({ embedded = false }) {
       if (!activeProject) return { folders: [], releases: [] }
       const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`)
       const folders = response?.folders || []
-      
+
       // Extract releases (top-level folders) sorted descending by name
       const releases = folders
         .filter(item => item.type === 'folder')
         .map(folder => ({ id: folder.id, name: folder.name, contents: folder.contents }))
         .sort((a, b) => b.name.localeCompare(a.name))
-      
+
       return { folders, releases }
     },
     enabled: !!activeProject,
@@ -125,9 +130,9 @@ function AssignmentsAndEmail({ embedded = false }) {
     queryKey: ['historicalTesters', activeProject?.id],
     queryFn: async () => {
       if (!activeProject || folderReleases.length === 0) return []
-      
+
       const testerSet = new Set()
-      
+
       // Helper to get all scripts from folders
       const getAllScripts = (items) => {
         const scripts = []
@@ -140,10 +145,10 @@ function AssignmentsAndEmail({ embedded = false }) {
         }
         return scripts
       }
-      
+
       // Get all scripts from all folders
       const allScripts = getAllScripts(allFolders)
-      
+
       // Fetch scripts in batches to get tester info
       const MAX_CONCURRENT = 20
       for (let i = 0; i < allScripts.length; i += MAX_CONCURRENT) {
@@ -151,7 +156,7 @@ function AssignmentsAndEmail({ embedded = false }) {
         const results = await Promise.allSettled(
           batch.map(script => apiGet(`/api/v1/scripts/${script.id}`))
         )
-        
+
         results.forEach(result => {
           if (result.status === 'fulfilled' && result.value) {
             const scriptDetails = result.value?.script || result.value
@@ -159,8 +164,8 @@ function AssignmentsAndEmail({ embedded = false }) {
               scriptDetails.runs.forEach(run => {
                 // Extract from headers._tester
                 const testerFromHeaders = run.headers?._tester
-                if (testerFromHeaders && testerFromHeaders.includes('@') && 
-                    testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
+                if (testerFromHeaders && testerFromHeaders.includes('@') &&
+                  testerFromHeaders !== 'anyone' && testerFromHeaders.toLowerCase() !== 'guest') {
                   testerSet.add(testerFromHeaders)
                 }
                 // Extract from assignee.email
@@ -183,7 +188,7 @@ function AssignmentsAndEmail({ embedded = false }) {
           }
         })
       }
-      
+
       return Array.from(testerSet).sort()
     },
     enabled: !!activeProject && folderReleases.length > 0 && allFolders.length > 0,
@@ -422,14 +427,14 @@ function AssignmentsAndEmail({ embedded = false }) {
   const selectAllNew = () => {
     const newRuns = filteredRuns.filter(r => r.state === 'new')
     const newRunIds = newRuns.map(r => r.id)
-    
+
     // Add all to selection
     setSelectedRunIds(prev => {
       const newSet = new Set(prev)
       newRunIds.forEach(id => newSet.add(id))
       return newSet
     })
-    
+
     // Add all to cache
     setSelectedRunsCache(prevCache => {
       const newCache = { ...prevCache }
@@ -448,7 +453,7 @@ function AssignmentsAndEmail({ embedded = false }) {
 
   const applyBulkTester = () => {
     if (!bulkTester) {
-      message.warning('Please select a tester first')
+      message.warning('Please select a user first')
       return
     }
     const newAssignments = { ...runAssignments }
@@ -575,6 +580,62 @@ function AssignmentsAndEmail({ embedded = false }) {
 
   // Total new runs across all (for reference)
   const totalNewRuns = allRuns.filter(r => r.state === 'new').length
+
+  // Group ALL selected runs by release for summary panel (includes those without tester)
+  const allSelectedRunsByRelease = useMemo(() => {
+    const selectedRuns = allSelectedRuns.filter(run =>
+      selectedRunIds.has(run.id) && run.state === 'new'
+    )
+
+    const grouped = {}
+    selectedRuns.forEach(run => {
+      const releaseKey = run.folderId || 'unknown'
+      const releaseName = run.folderName || 'Unknown Release'
+      if (!grouped[releaseKey]) {
+        grouped[releaseKey] = {
+          id: releaseKey,
+          name: releaseName,
+          runs: []
+        }
+      }
+      grouped[releaseKey].runs.push({
+        ...run,
+        testerEmail: runAssignments[run.id] || null
+      })
+    })
+
+    // Sort by release name (latest first)
+    return Object.values(grouped).sort((a, b) => b.name.localeCompare(a.name))
+  }, [allSelectedRuns, selectedRunIds, runAssignments])
+
+  // Group only runs READY TO SEND by release (for confirmation modal)
+  const selectedRunsByRelease = useMemo(() => {
+    const runsReadyToSend = allSelectedRuns.filter(run =>
+      selectedRunIds.has(run.id) &&
+      run.state === 'new' &&
+      runAssignments[run.id]
+    )
+
+    const grouped = {}
+    runsReadyToSend.forEach(run => {
+      const releaseKey = run.folderId || 'unknown'
+      const releaseName = run.folderName || 'Unknown Release'
+      if (!grouped[releaseKey]) {
+        grouped[releaseKey] = {
+          id: releaseKey,
+          name: releaseName,
+          runs: []
+        }
+      }
+      grouped[releaseKey].runs.push({
+        ...run,
+        testerEmail: runAssignments[run.id]
+      })
+    })
+
+    // Sort by release name (latest first)
+    return Object.values(grouped).sort((a, b) => b.name.localeCompare(a.name))
+  }, [allSelectedRuns, selectedRunIds, runAssignments])
 
   // Render loading state
   if (isLoading && allRuns.length === 0) {
@@ -980,12 +1041,106 @@ function AssignmentsAndEmail({ embedded = false }) {
           </div>
         </div>
 
+        {/* Summary Panel - Expandible - Shows when there are selections */}
+        {selectedNewCount > 0 && (
+          <div style={{
+            marginTop: 20,
+            background: 'white',
+            border: '2px solid #1890ff',
+            borderRadius: 8,
+            overflow: 'hidden',
+            boxShadow: '0 2px 8px rgba(24, 144, 255, 0.15)'
+          }}>
+            <div
+              onClick={() => setSummaryPanelOpen(!summaryPanelOpen)}
+              style={{
+                padding: '12px 16px',
+                background: 'linear-gradient(135deg, #1890ff 0%, #096dd9 100%)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                cursor: 'pointer'
+              }}
+            >
+              <span style={{ fontWeight: 600, color: 'white', fontSize: 14 }}>
+                📋 {selectedNewCount} runs selected {readyToSendCount > 0 && `(${readyToSendCount} ready to send)`}
+              </span>
+              <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>
+                {summaryPanelOpen ? <UpOutlined /> : <DownOutlined />} {summaryPanelOpen ? 'Collapse' : 'Expand'}
+              </span>
+            </div>
+
+            {summaryPanelOpen && (
+              <div style={{ padding: '16px', maxHeight: 250, overflowY: 'auto', background: '#fafafa' }}>
+                {allSelectedRunsByRelease.map((release, idx) => (
+                  <div key={release.id} style={{
+                    marginBottom: idx < allSelectedRunsByRelease.length - 1 ? 16 : 0,
+                    background: 'white',
+                    borderRadius: 6,
+                    border: '1px solid #e8e8e8',
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      padding: '8px 12px',
+                      background: release.id === latestReleaseId ? '#f6ffed' : '#fff7e6',
+                      borderBottom: '1px solid #e8e8e8',
+                      fontSize: 13,
+                      color: release.id === latestReleaseId ? '#389e0d' : '#d48806',
+                      fontWeight: 600
+                    }}>
+                      {release.id === latestReleaseId ? '✓ ' : ''}{release.name} {release.id === latestReleaseId ? '(Latest)' : ''} — {release.runs.length} run{release.runs.length > 1 ? 's' : ''}
+                    </div>
+                    <div style={{ padding: '8px 12px' }}>
+                      {release.runs.map((run, runIdx) => (
+                        <div key={run.id} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                          padding: '8px 0',
+                          borderBottom: runIdx < release.runs.length - 1 ? '1px solid #f0f0f0' : 'none'
+                        }}>
+                          <span style={{ color: '#1890ff', fontWeight: 700, minWidth: 40 }}>#{run.runNumber}</span>
+                          <span style={{ flex: 1, fontWeight: 500, color: '#333' }}>{run.scriptName}</span>
+                          {run.testerEmail ? (
+                            <span style={{
+                              color: '#52c41a',
+                              fontSize: 13,
+                              fontWeight: 500,
+                              background: '#f6ffed',
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              border: '1px solid #b7eb8f'
+                            }}>
+                              → {run.testerEmail}
+                            </span>
+                          ) : (
+                            <span style={{
+                              color: '#faad14',
+                              fontSize: 12,
+                              background: '#fffbe6',
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              border: '1px solid #ffe58f'
+                            }}>
+                              ⚠ No tester assigned
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Footer Actions */}
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginTop: 20,
+          marginTop: 16,
           padding: '16px 20px',
           background: 'white',
           borderRadius: 8,
@@ -1004,26 +1159,123 @@ function AssignmentsAndEmail({ embedded = false }) {
               {readyToSendCount} have tester assigned
             </div>
           </div>
-          <Button
-            type="primary"
-            size="large"
-            icon={<SendOutlined />}
-            onClick={handleSendEmails}
-            loading={sendingEmails}
-            disabled={readyToSendCount === 0}
-            style={{
-              background: '#52c41a',
-              borderColor: '#52c41a',
-              height: 44,
-              paddingLeft: 24,
-              paddingRight: 24,
-              fontWeight: 600
-            }}
+          <Tooltip
+            title={readyToSendCount === 0 ? "Select a user first, then click 'Apply to Selected'" : ''}
+            placement="top"
           >
-            Assign & Send ({readyToSendCount})
-          </Button>
+            <span>
+              <Button
+                type="primary"
+                size="large"
+                icon={<SendOutlined />}
+                onClick={() => setConfirmModalOpen(true)}
+                disabled={readyToSendCount === 0}
+                style={{
+                  background: readyToSendCount > 0 ? '#52c41a' : undefined,
+                  borderColor: readyToSendCount > 0 ? '#52c41a' : undefined,
+                  height: 44,
+                  paddingLeft: 24,
+                  paddingRight: 24,
+                  fontWeight: 600
+                }}
+              >
+                Assign & Send ({readyToSendCount})
+              </Button>
+            </span>
+          </Tooltip>
         </div>
       </Card>
+
+      {/* Confirmation Modal */}
+      <Modal
+        title="📧 Confirm Assignment & Send"
+        open={confirmModalOpen}
+        onCancel={() => setConfirmModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setConfirmModalOpen(false)}>
+            Cancel
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            icon={<SendOutlined />}
+            loading={sendingEmails}
+            onClick={() => {
+              setConfirmModalOpen(false)
+              handleSendEmails()
+            }}
+            style={{
+              background: '#52c41a',
+              borderColor: '#52c41a'
+            }}
+          >
+            Confirm & Send ({readyToSendCount})
+          </Button>
+        ]}
+        width={600}
+      >
+        <p style={{ marginBottom: 16, color: '#666' }}>
+          You are about to assign and send emails to the following {readyToSendCount} run{readyToSendCount > 1 ? 's' : ''}:
+        </p>
+
+        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          {selectedRunsByRelease.map((release) => (
+            <div key={release.id} style={{
+              border: '1px solid #e8e8e8',
+              borderRadius: 8,
+              marginBottom: 12,
+              overflow: 'hidden',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.05)'
+            }}>
+              <div style={{
+                padding: '10px 14px',
+                background: release.id === latestReleaseId ? '#f6ffed' : '#fff7e6',
+                borderBottom: '1px solid #e8e8e8',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div>
+                  <Tag style={{
+                    background: release.id === latestReleaseId ? '#52c41a' : '#faad14',
+                    color: 'white',
+                    border: 'none',
+                    fontWeight: 600
+                  }}>
+                    {release.id === latestReleaseId ? '✓ ' : ''}{release.name} {release.id === latestReleaseId ? '(Latest)' : ''}
+                  </Tag>
+                  <span style={{ marginLeft: 8, fontWeight: 600, color: '#333' }}>{release.runs.length} run{release.runs.length > 1 ? 's' : ''}</span>
+                </div>
+              </div>
+              <div style={{ padding: '8px 14px', background: 'white' }}>
+                {release.runs.map((run, idx) => (
+                  <div key={run.id} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '10px 0',
+                    borderBottom: idx < release.runs.length - 1 ? '1px solid #f0f0f0' : 'none'
+                  }}>
+                    <span style={{ color: '#1890ff', fontWeight: 700, fontSize: 14, minWidth: 45 }}>#{run.runNumber}</span>
+                    <span style={{ flex: 1, fontWeight: 500, color: '#333' }}>{run.scriptName}</span>
+                    <span style={{
+                      color: '#52c41a',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      background: '#f6ffed',
+                      padding: '4px 10px',
+                      borderRadius: 4,
+                      border: '1px solid #b7eb8f'
+                    }}>
+                      → {run.testerEmail}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
 
       {/* Warning Note */}
       <Alert
