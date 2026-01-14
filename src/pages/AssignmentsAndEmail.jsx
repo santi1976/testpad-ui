@@ -1054,20 +1054,34 @@ function AssignmentsAndEmail({ embedded = false }) {
             <div
               onClick={() => setSummaryPanelOpen(!summaryPanelOpen)}
               style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr auto 1fr',
+                alignItems: 'center',
                 padding: '12px 16px',
                 background: 'linear-gradient(135deg, #1890ff 0%, #096dd9 100%)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
                 cursor: 'pointer'
               }}
             >
               <span style={{ fontWeight: 600, color: 'white', fontSize: 14 }}>
                 📋 {selectedNewCount} runs selected {readyToSendCount > 0 && `(${readyToSendCount} ready to send)`}
               </span>
-              <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>
-                {summaryPanelOpen ? <UpOutlined /> : <DownOutlined />} {summaryPanelOpen ? 'Collapse' : 'Expand'}
-              </span>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <span style={{
+                  fontSize: '16px',
+                  fontWeight: '800',
+                  color: '#ffffff',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  textShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                }}>
+                  {summaryPanelOpen ? <UpOutlined /> : <DownOutlined />}
+                  {summaryPanelOpen ? 'COLLAPSE' : 'EXPAND'}
+                </span>
+              </div>
+              <div></div>
             </div>
 
             {summaryPanelOpen && (
