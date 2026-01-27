@@ -59,9 +59,9 @@ export async function apiPost<T = unknown>(path: string, body: unknown): Promise
 }
 
 export async function apiPut<T = unknown>(path: string, body: unknown): Promise<T> {
-  const token = import.meta.env.VITE_TESTPAD_API_TOKEN
+  const token = getApiToken()
   if (!token) {
-    throw new Error('API token not found in environment variables')
+    throw new Error('API token not found. Please log in.')
   }
   // Use relative path so Vite proxy works
   const res = await fetch(path, {

@@ -10,8 +10,9 @@ export default function Navbar() {
   }
 
   const navItems = [
-    { key: '/dashboard', label: 'Dashboard' },
-    { key: '/test-executions', label: 'Test Executions' },
+    { key: '/', label: 'Dashboard' },
+    { key: '/test-runs', label: 'Test Runs' },
+    { key: '/projects', label: 'Projects' },
   ]
 
   return (

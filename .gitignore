@@ -27,5 +27,15 @@ dist-ssr
 .env
 .env.local
 .env.*.local
-.env    
+.env
 .vercel
+
+# Backup files
+bak/
+
+# Internal documentation
+CHECKPOINT.md
+
+# Audit and external projects
+_auditfs/
+testpad-dash-main/

@@ -52,8 +52,8 @@ code {
     --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
@@ -71,6 +71,18 @@ code {
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
+
+    /* Chart colors for test results */
+    --chart-pass: 142 76% 36%;
+    --chart-fail: 0 84% 60%;
+    --chart-block: 38 92% 50%;
+    --chart-query: 199 89% 48%;
+    --chart-pending: 215 16% 47%;
+
+    /* Status colors */
+    --success: 142 76% 36%;
+    --warning: 38 92% 50%;
+    --info: 199 89% 48%;
   }
   .dark {
     --background: 0 0% 3.9%;
