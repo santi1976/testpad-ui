@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- CSP for development only - allows eval for hot module replacement -->
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline'; object-src 'none';">
+    <!-- CSP for development only - allows eval for hot module replacement and Vercel Live -->
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline' https://vercel.live; script-src-elem 'self' 'unsafe-inline' https://vercel.live; object-src 'none';">
     <title>Testpad Dashboard</title>
   </head>
   <body>
