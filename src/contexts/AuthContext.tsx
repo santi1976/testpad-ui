@@ -60,12 +60,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.setItem('testpad_user', JSON.stringify(userData))
     setUser(userData)
 
+    // Dispatch event so TestersContext can refresh
+    window.dispatchEvent(new CustomEvent('testpad-login'))
+
     return userData
   }
 
   // Logout function
   const logout = () => {
     localStorage.removeItem('testpad_user')
+    localStorage.removeItem('testpad_testers_global')
     setUser(null)
   }
 

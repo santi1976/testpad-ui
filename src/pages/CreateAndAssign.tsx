@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
+  ArrowRight,
   Plus,
   Check,
   Send,
@@ -14,6 +15,9 @@ import {
 import { apiGet } from '../utils/api'
 import { assignAndSendEmail } from '../api/assignAndSendEmail'
 import { markEmailSent, hasEmailSent, getEmailRecipient } from '../utils/emailTracking'
+import { normalizeTester, sortTesters } from '../utils/normalizeTester'
+import { useGlobalTesters } from '../contexts/TestersContext'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -36,19 +40,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -294,93 +285,24 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
     return allScripts.filter((s) => selectedScriptIds.has(s.id))
   }, [allScripts, selectedScriptIds])
 
-  // Get ALL testers from ALL projects
-  const { data: allTestersData } = useQuery({
-    queryKey: ['allTesters'],
-    queryFn: async () => {
-      if (projects.length === 0) return []
-      const testerSet = new Set<string>()
+  // Get testers from global context (loaded once, cached in localStorage)
+  const { testers: allTestersData, isLoading: testersLoading } = useGlobalTesters()
 
-      for (const project of projects) {
-        try {
-          const foldersResponse = await apiGet(`/api/v1/projects/${project.id}/folders`)
-          const foldersData = foldersResponse?.folders || []
-
-          const collectScripts = (items: FolderItem[]): FolderItem[] => {
-            const scripts: FolderItem[] = []
-            for (const item of items) {
-              if (item.type === 'script') scripts.push(item)
-              else if (item.type === 'folder' && item.contents) {
-                scripts.push(...collectScripts(item.contents))
-              }
-            }
-            return scripts
-          }
-
-          const scripts = collectScripts(foldersData)
-
-          const scriptResults = await Promise.allSettled(
-            scripts.map(async (script) => {
-              const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
-              return scriptData
-            })
-          )
-
-          scriptResults.forEach((result) => {
-            if (result.status === 'fulfilled' && result.value) {
-              const scriptDetails = result.value?.script || result.value
-              const runs = scriptDetails?.runs || []
-
-              runs.forEach((run: Record<string, unknown>) => {
-                const headers = run.headers as Record<string, string> | undefined
-                const testerFromHeaders = headers?._tester
-                if (
-                  testerFromHeaders &&
-                  testerFromHeaders !== 'anyone' &&
-                  testerFromHeaders !== 'guest' &&
-                  testerFromHeaders.includes('@')
-                ) {
-                  testerSet.add(testerFromHeaders)
-                }
-                const assignee = run.assignee as { email?: string } | undefined
-                const testerFromAssignee = assignee?.email
-                if (testerFromAssignee && testerFromAssignee.includes('@')) {
-                  testerSet.add(testerFromAssignee)
-                }
-                if (run.label && typeof run.label === 'string') {
-                  const parts = run.label.split(' / ')
-                  if (parts.length >= 2) {
-                    const email = parts[1].trim()
-                    if (email.includes('@') && email !== 'anyone' && email !== 'guest') {
-                      testerSet.add(email)
-                    }
-                  }
-                }
-              })
-            }
-          })
-        } catch {
-          // ignore errors
-        }
-      }
-
-      return Array.from(testerSet).sort()
-    },
-    enabled: projects.length > 0,
-    staleTime: 30 * 60 * 1000,
-  })
-
-  // Extract users
+  // Extract users (normalized, emails first then names)
   const users = useMemo(() => {
     const userSet = new Set<string>()
     if (allTestersData && Array.isArray(allTestersData)) {
       allTestersData.forEach((email) => userSet.add(email))
     }
     Object.values(runAssignments).forEach((email) => {
-      if (email && email.includes('@')) userSet.add(email)
+      const normalized = normalizeTester(email)
+      if (normalized) userSet.add(normalized)
     })
-    return Array.from(userSet).sort()
+    return sortTesters(Array.from(userSet))
   }, [allTestersData, runAssignments])
+
+  // Flag para saber si mostrar el dropdown de testers
+  const testersReady = !testersLoading && users.length > 0
 
   // Create runs mutation
   const createRunsMutation = useMutation({
@@ -927,6 +849,14 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                 >
                   Create More Runs
                 </Button>
+                <Button
+                  size="sm"
+                  onClick={() => navigate('/assignments')}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  Batch Assignments
+                  <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -939,37 +869,16 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                     Quick Assign: Assign all unassigned runs to the same tester
                   </p>
                   <div className="flex gap-2">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="w-[300px] justify-start">
-                          {quickAssignTester || 'Search tester...'}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[300px] p-0">
-                        <Command>
-                          <CommandInput placeholder="Search tester..." />
-                          <CommandList>
-                            <CommandEmpty>No tester found.</CommandEmpty>
-                            <CommandGroup>
-                              {users.map((user) => (
-                                <CommandItem
-                                  key={user}
-                                  value={user}
-                                  onSelect={() => setQuickAssignTester(user)}
-                                >
-                                  <Avatar className="h-6 w-6 mr-2">
-                                    <AvatarFallback className="text-xs bg-blue-500 text-white">
-                                      {getInitials(user)}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  {user}
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                    <SearchableSelect
+                      options={users.map((user) => ({ value: user, label: user }))}
+                      value={quickAssignTester}
+                      onValueChange={setQuickAssignTester}
+                      placeholder={testersLoading ? "Loading testers..." : "Search tester..."}
+                      searchPlaceholder="Search tester..."
+                      emptyMessage={testersLoading ? "Loading..." : "No tester found."}
+                      triggerClassName="w-[300px]"
+                      disabled={testersLoading}
+                    />
                     <Button
                       onClick={handleQuickAssignAll}
                       disabled={
@@ -1081,46 +990,21 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                               </div>
                             ) : (
                               <div className="flex gap-2">
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <Button
-                                      variant="outline"
-                                      className="flex-1 justify-start"
-                                      disabled={isAssigning}
-                                    >
-                                      {pendingSelection || 'Search tester...'}
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-[300px] p-0">
-                                    <Command>
-                                      <CommandInput placeholder="Search tester..." />
-                                      <CommandList>
-                                        <CommandEmpty>No tester found.</CommandEmpty>
-                                        <CommandGroup>
-                                          {users.map((user) => (
-                                            <CommandItem
-                                              key={user}
-                                              value={user}
-                                              onSelect={() =>
-                                                setPendingAssignments((prev) => ({
-                                                  ...prev,
-                                                  [String(runId)]: user,
-                                                }))
-                                              }
-                                            >
-                                              <Avatar className="h-6 w-6 mr-2">
-                                                <AvatarFallback className="text-xs bg-blue-500 text-white">
-                                                  {getInitials(user)}
-                                                </AvatarFallback>
-                                              </Avatar>
-                                              {user}
-                                            </CommandItem>
-                                          ))}
-                                        </CommandGroup>
-                                      </CommandList>
-                                    </Command>
-                                  </PopoverContent>
-                                </Popover>
+                                <SearchableSelect
+                                  options={users.map((user) => ({ value: user, label: user }))}
+                                  value={pendingSelection}
+                                  onValueChange={(val) =>
+                                    setPendingAssignments((prev) => ({
+                                      ...prev,
+                                      [String(runId)]: val,
+                                    }))
+                                  }
+                                  placeholder={testersLoading ? "Loading testers..." : "Search tester..."}
+                                  searchPlaceholder="Search tester..."
+                                  emptyMessage={testersLoading ? "Loading..." : "No tester found."}
+                                  disabled={isAssigning || testersLoading}
+                                  triggerClassName="flex-1"
+                                />
                                 <Button
                                   disabled={
                                     !pendingSelection ||

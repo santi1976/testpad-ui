@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { apiGet } from '../utils/api'
+import { useGlobalTesters } from '../contexts/TestersContext'
+import { normalizeTester, sortTesters } from '../utils/normalizeTester'
 import { hasEmailSent, getEmailRecipient } from '../utils/emailTracking'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -34,6 +36,15 @@ import {
 } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { cn } from '@/lib/utils'
+import { SearchableSelect } from '@/components/ui/searchable-select'
+
+// Create URL-friendly slug from name
+function createSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
 
 // Types
 interface Project {
@@ -294,80 +305,8 @@ export default function TestRuns() {
   const folderReleases: Folder[] = foldersData?.releases || []
   const allFoldersData: FolderItem[] = foldersData?.folders || []
 
-  // Fetch testers from ALL releases
-  const { data: historicalTestersData } = useQuery({
-    queryKey: ['historicalTesters', activeProject?.id],
-    queryFn: async () => {
-      if (!activeProject || folderReleases.length === 0) return []
-
-      const testerSet = new Set<string>()
-
-      const getAllScripts = (items: FolderItem[]): FolderItem[] => {
-        const scripts: FolderItem[] = []
-        for (const item of items) {
-          if (item.type === 'script') {
-            scripts.push(item)
-          } else if (item.type === 'folder' && item.contents) {
-            scripts.push(...getAllScripts(item.contents))
-          }
-        }
-        return scripts
-      }
-
-      const allScripts = getAllScripts(allFoldersData)
-
-      const MAX_CONCURRENT = 20
-      for (let i = 0; i < allScripts.length; i += MAX_CONCURRENT) {
-        const batch = allScripts.slice(i, i + MAX_CONCURRENT)
-        const results = await Promise.allSettled(
-          batch.map((script) => apiGet(`/api/v1/scripts/${script.id}`))
-        )
-
-        results.forEach((result) => {
-          if (result.status === 'fulfilled' && result.value) {
-            const scriptDetails = result.value?.script || result.value
-            if (scriptDetails.runs && Array.isArray(scriptDetails.runs)) {
-              scriptDetails.runs.forEach((run: Run) => {
-                const testerFromHeaders = run.headers?._tester
-                if (
-                  testerFromHeaders &&
-                  testerFromHeaders.includes('@') &&
-                  testerFromHeaders !== 'anyone' &&
-                  testerFromHeaders.toLowerCase() !== 'guest'
-                ) {
-                  testerSet.add(testerFromHeaders)
-                }
-                const testerFromAssignee = run.assignee?.email
-                if (testerFromAssignee && testerFromAssignee.includes('@')) {
-                  testerSet.add(testerFromAssignee)
-                }
-                if (run.label) {
-                  const parts = run.label.split(' / ')
-                  if (parts.length >= 2) {
-                    const email = parts[1].trim()
-                    if (
-                      email.includes('@') &&
-                      email !== 'anyone' &&
-                      email.toLowerCase() !== 'guest'
-                    ) {
-                      testerSet.add(email)
-                    }
-                  }
-                }
-              })
-            }
-          }
-        })
-      }
-
-      return Array.from(testerSet).sort()
-    },
-    enabled: !!activeProject && folderReleases.length > 0 && allFoldersData.length > 0,
-    staleTime: 10 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
-  })
-
-  const historicalTesters: string[] = historicalTestersData || []
+  // Get testers from global context (loaded once, cached in localStorage)
+  const { testers: historicalTesters, isLoading: testersLoading } = useGlobalTesters()
 
   // Resolve effective folder ID
   const effectiveFolderId = useMemo(() => {
@@ -678,15 +617,14 @@ export default function TestRuns() {
     return true
   })
 
-  // Get unique users list
+  // Get unique users list (normalized, emails first then names)
   const users = useMemo(() => {
     const userSet = new Set(historicalTesters)
     allRuns.forEach((run) => {
-      if (run.userInfo?.email && run.userInfo.email.includes('@')) {
-        userSet.add(run.userInfo.email)
-      }
+      const normalized = normalizeTester(run.userInfo?.email)
+      if (normalized) userSet.add(normalized)
     })
-    return Array.from(userSet).sort((a, b) => a.localeCompare(b))
+    return sortTesters(Array.from(userSet))
   }, [historicalTesters, allRuns])
 
   // Get unique test suites list
@@ -1054,47 +992,35 @@ export default function TestRuns() {
 
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-sm">User:</span>
-                  <Select value={selectedUser} onValueChange={setSelectedUser}>
-                    <SelectTrigger className={cn(
-                      "w-[200px]",
-                      selectedUser && selectedUser !== 'all' && "bg-cyan-50 border-cyan-400"
-                    )}>
-                      <SelectValue placeholder="All users" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All users</SelectItem>
-                      {users.map((user) => (
-                        <SelectItem key={user} value={user}>
-                          {user}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    options={[
+                      { value: 'all', label: 'All users' },
+                      ...users.map((user) => ({ value: user, label: user }))
+                    ]}
+                    value={selectedUser}
+                    onValueChange={setSelectedUser}
+                    placeholder={testersLoading ? "Loading..." : "All users"}
+                    searchPlaceholder="Search users..."
+                    emptyMessage={testersLoading ? "Loading..." : "No user found."}
+                    triggerClassName="w-[200px]"
+                  />
                 </div>
 
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-sm">Test Suite:</span>
-                  <Select
+                  <SearchableSelect
+                    options={[
+                      { value: 'all', label: 'All test suites' },
+                      ...testSuites.map((suite) => ({ value: String(suite.id), label: suite.name }))
+                    ]}
                     value={selectedTestSuite || 'all'}
                     onValueChange={(value) => {
                       setSelectedTestSuite(value === 'all' ? null : value)
                     }}
-                  >
-                    <SelectTrigger className={cn(
-                      "w-[200px]",
-                      selectedTestSuite && "bg-cyan-50 border-cyan-400"
-                    )}>
-                      <SelectValue placeholder="All test suites" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All test suites</SelectItem>
-                      {testSuites.map((suite) => (
-                        <SelectItem key={suite.id} value={String(suite.id)}>
-                          {suite.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="All test suites"
+                    searchPlaceholder="Search test suites..."
+                    triggerClassName="w-[200px]"
+                  />
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1332,10 +1258,16 @@ export default function TestRuns() {
                                   <span
                                     className="font-semibold cursor-pointer hover:text-blue-500"
                                     onClick={() => {
-                                      navigate(`/test-suite/${scriptId}`, {
+                                      const slug = createSlug(firstRun.script.name)
+                                      sessionStorage.setItem('testSuiteContext', JSON.stringify({
+                                        scriptId: scriptId,
+                                        scriptName: firstRun.script.name,
+                                      }))
+                                      navigate(`/test-suite/${slug}`, {
                                         state: {
                                           project: firstRun.project,
-                                          folder: null,
+                                          folder: firstRun.folder,
+                                          scriptId: scriptId,
                                         },
                                       })
                                     }}
@@ -1598,10 +1530,16 @@ export default function TestRuns() {
                                       className="text-sm font-semibold text-blue-500 cursor-pointer hover:underline"
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        navigate(`/test-suite/${run.script.id}`, {
+                                        const slug = createSlug(run.script.name)
+                                        sessionStorage.setItem('testSuiteContext', JSON.stringify({
+                                          scriptId: run.script.id,
+                                          scriptName: run.script.name,
+                                        }))
+                                        navigate(`/test-suite/${slug}`, {
                                           state: {
                                             project: run.project,
-                                            folder: null,
+                                            folder: run.folder,
+                                            scriptId: run.script.id,
                                           },
                                         })
                                       }}
@@ -1880,14 +1818,20 @@ export default function TestRuns() {
                           </p>
                           <p
                             className="text-blue-500 cursor-pointer hover:underline"
-                            onClick={() =>
-                              navigate(`/test-suite/${selectedRun.script.id}`, {
+                            onClick={() => {
+                              const slug = createSlug(selectedRun.script.name)
+                              sessionStorage.setItem('testSuiteContext', JSON.stringify({
+                                scriptId: selectedRun.script.id,
+                                scriptName: selectedRun.script.name,
+                              }))
+                              navigate(`/test-suite/${slug}`, {
                                 state: {
                                   project: selectedRun.project,
                                   folder: selectedRun.folder,
+                                  scriptId: selectedRun.script.id,
                                 },
                               })
-                            }
+                            }}
                           >
                             {selectedRun.script.name}
                           </p>
@@ -2056,18 +2000,24 @@ export default function TestRuns() {
                                   variant="link"
                                   size="sm"
                                   className="p-0 text-xs"
-                                  onClick={() =>
-                                    navigate(`/test-suite/${selectedRun.script.id}`, {
+                                  onClick={() => {
+                                    const slug = createSlug(selectedRun.script.name)
+                                    sessionStorage.setItem('testSuiteContext', JSON.stringify({
+                                      scriptId: selectedRun.script.id,
+                                      scriptName: selectedRun.script.name,
+                                    }))
+                                    navigate(`/test-suite/${slug}`, {
                                       state: {
                                         project: selectedRun.project,
                                         folder: selectedRun.folder,
+                                        scriptId: selectedRun.script.id,
                                         runIndex: selectedRun.userInfo?.runNumber
                                           ? Number(selectedRun.userInfo.runNumber) - 1
                                           : 0,
                                         highlightIssues: true,
                                       },
                                     })
-                                  }
+                                  }}
                                 >
                                   View all tests with highlights
                                 </Button>
