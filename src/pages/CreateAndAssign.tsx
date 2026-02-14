@@ -358,6 +358,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
       }
 
       queryClient.invalidateQueries({ queryKey: ['allRuns'] })
+      queryClient.invalidateQueries({ queryKey: ['scriptRunCounts'] })
     },
     onError: (error) => {
       toast.error(`Error: ${(error as Error).message}`)
@@ -851,7 +852,12 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => navigate('/assignments')}
+                  onClick={() => navigate('/assignments', {
+                    state: {
+                      projectId: selectedProject?.id,
+                      releaseId: selectedReleaseFilter,
+                    }
+                  })}
                   className="bg-blue-600 hover:bg-blue-700"
                 >
                   Batch Assignments

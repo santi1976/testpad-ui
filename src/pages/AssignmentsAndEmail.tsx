@@ -136,7 +136,7 @@ function getEffectiveTester(run: Run, assignments: Record<string, string>): stri
   if (run.id in assignments) {
     return assignments[run.id] || null
   }
-  return run.tester || null
+  return null
 }
 
 const AVATAR_COLORS = [
@@ -221,6 +221,21 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
       if (testpadApiProject) setSelectedProject(testpadApiProject)
     }
   }, [projects, selectedProject])
+
+  useEffect(() => {
+    const navState = location.state as { projectId?: string | number; releaseId?: string } | null
+    if (navState?.projectId && projects.length > 0) {
+      const project = projects.find((p) => String(p.id) === String(navState.projectId))
+      if (project) {
+        setSelectedProject(project)
+        if (navState.releaseId) {
+          setSelectedReleaseId(navState.releaseId)
+        }
+        setSelectedTestSuiteId('all')
+        window.history.replaceState({}, '')
+      }
+    }
+  }, [projects, location.state])
 
   const activeProject =
     selectedProject ||

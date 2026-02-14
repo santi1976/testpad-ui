@@ -25,7 +25,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   // Login function - validates Email + API Token against Testpad API
-  const login = async (email: string, apiToken: string): Promise<User> => {
+  const login = async (email: string, password: string, apiToken: string): Promise<User> => {
     // Validate email domain
     const allowedDomains = ['bitfinex.com', 'tether.com']
     const emailDomain = email.split('@')[1]?.toLowerCase()
@@ -52,6 +52,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Save user and token in localStorage
     const userData: User = {
       email,
+      password,
       apiToken,
       domain: emailDomain,
       loginTime: new Date().toISOString()

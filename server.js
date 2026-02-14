@@ -16,26 +16,15 @@ const __dirname = dirname(__filename)
 const isProduction = process.env.NODE_ENV === 'production'
 
 const PORT = process.env.PORT || 5173
-const USERNAME = process.env.USER_TESTPAD
-const PASSWORD = process.env.PASSWORD_TESTPAD?.trim()
 const COMPANY_OID = process.env.COMPANY_OID
-
-if (!USERNAME || !PASSWORD) {
-  console.error('❌ USER_TESTPAD and PASSWORD_TESTPAD must be set in .env')
-  process.exit(1)
-}
 
 if (!COMPANY_OID) {
   console.error('❌ COMPANY_OID must be set in .env')
   process.exit(1)
 }
 
-// Session storage (in production, use Redis or similar)
-let sessionData = {
-  cookies: '',
-  csrfToken: '',
-  lastLogin: null
-}
+// Per-user session cache (in production, use Redis or similar)
+const userSessions = new Map() // email -> { cookies, csrfToken, lastLogin }
 
 function extractCookies(setCookieHeaders) {
   if (!setCookieHeaders || setCookieHeaders.length === 0) return ''
@@ -62,7 +51,7 @@ function httpsRequest(options, body = null) {
   })
 }
 
-async function loginToTestpad() {
+async function loginToTestpad(userEmail, userPassword) {
   // Step 1: Get login page
   const loginPage = await httpsRequest({
     hostname: 'app.testpad.com',
@@ -77,7 +66,7 @@ async function loginToTestpad() {
   })
 
   let cookies = loginPage.cookies
-  
+
   // Extract CSRF token
   const csrfMatch = loginPage.data.match(/name=['"]csrfmiddlewaretoken['"][^>]*value=['"]([^'"]+)/i)
   if (!csrfMatch) {
@@ -85,8 +74,8 @@ async function loginToTestpad() {
   }
   const csrfToken = csrfMatch[1]
 
-  // Step 2: Submit login
-  const formData = `csrfmiddlewaretoken=${encodeURIComponent(csrfToken)}&email=${encodeURIComponent(USERNAME)}&password=${encodeURIComponent(PASSWORD)}&js=y&next=`
+  // Step 2: Submit login with user's credentials
+  const formData = `csrfmiddlewaretoken=${encodeURIComponent(csrfToken)}&email=${encodeURIComponent(userEmail)}&password=${encodeURIComponent(userPassword)}&js=y&next=`
   
   const loginResponse = await httpsRequest({
     hostname: 'app.testpad.com',
@@ -151,22 +140,27 @@ async function loginToTestpad() {
   const cookieCsrfMatch = cookies.match(/csrftoken=([^;]+)/)
   const finalCsrfToken = cookieCsrfMatch ? cookieCsrfMatch[1] : csrfToken
 
-  sessionData = {
+  const session = {
     cookies,
     csrfToken: finalCsrfToken,
     lastLogin: Date.now()
   }
 
-  return sessionData
+  userSessions.set(userEmail, session)
+  return session
 }
 
-async function ensureLoggedIn() {
-  // Re-login if session is older than 10 minutes
-  const SESSION_TTL = 10 * 60 * 1000
-  if (!sessionData.cookies || !sessionData.lastLogin || (Date.now() - sessionData.lastLogin) > SESSION_TTL) {
-    await loginToTestpad()
+async function ensureLoggedIn(userEmail, userPassword) {
+  if (!userEmail || !userPassword) {
+    throw new Error('User credentials required. Please log in with email and password.')
   }
-  return sessionData
+  // Re-login if session is older than 10 minutes or doesn't exist
+  const SESSION_TTL = 10 * 60 * 1000
+  const session = userSessions.get(userEmail)
+  if (!session || !session.cookies || !session.lastLogin || (Date.now() - session.lastLogin) > SESSION_TTL) {
+    return await loginToTestpad(userEmail, userPassword)
+  }
+  return session
 }
 
 async function startServer() {
@@ -219,16 +213,20 @@ async function startServer() {
   })
 
   // API endpoint: Assign run and send email
-  // NOTE: Uses USER_TESTPAD and PASSWORD_TESTPAD from .env (system user for sending emails only)
+  // Uses the logged-in user's credentials to create a Testpad session
   app.post('/api/assign-and-send', async (req, res) => {
     try {
-      const { scriptId, runId, targetEmail, scriptName } = req.body
-      
+      const { scriptId, runId, targetEmail, scriptName, senderEmail, senderPassword } = req.body
+
       if (!scriptId || !runId || !targetEmail || !scriptName) {
         return res.status(400).json({ error: 'Missing required fields' })
       }
 
-      const { cookies, csrfToken } = await ensureLoggedIn()
+      if (!senderEmail || !senderPassword) {
+        return res.status(401).json({ error: 'User credentials required. Please log in with email and password.' })
+      }
+
+      const { cookies, csrfToken } = await ensureLoggedIn(senderEmail, senderPassword)
 
       // Generate ObjectId
       const timestamp = Math.floor(Date.now() / 1000).toString(16).padStart(8, '0')
@@ -293,7 +291,6 @@ async function startServer() {
       }
 
       // Step 2: sendemail
-      const senderEmail = USERNAME
       const senderName = senderEmail.split('@')[0].split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ')
 
       const sendemailBody = JSON.stringify({
@@ -337,9 +334,9 @@ async function startServer() {
 
   // Proxy for Testpad API (/api/v1/...)
   app.use('/api/v1', async (req, res) => {
-    const token = process.env.VITE_TESTPAD_API_TOKEN
-    if (!token) {
-      return res.status(500).json({ error: 'VITE_TESTPAD_API_TOKEN not set' })
+    const authHeader = req.headers.authorization
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Authorization header required. Please log in.' })
     }
 
     const targetPath = `/api/v1${req.url}`
@@ -351,7 +348,7 @@ async function startServer() {
         path: targetPath,
         method: req.method,
         headers: {
-          'Authorization': `apikey ${token}`,
+          'Authorization': authHeader,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },

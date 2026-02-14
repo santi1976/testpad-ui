@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export default function Login() {
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [apiToken, setApiToken] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [emailError, setEmailError] = useState<string | null>(null)
@@ -47,6 +48,10 @@ export default function Login() {
     setError(null)
 
     if (!validateEmail(email)) return
+    if (!password) {
+      setError('Please enter your Testpad password')
+      return
+    }
     if (!apiToken) {
       setError('Please enter your API token')
       return
@@ -54,7 +59,7 @@ export default function Login() {
 
     setLoading(true)
     try {
-      await login(email, apiToken)
+      await login(email, password, apiToken)
       navigate('/', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error signing in')
@@ -107,6 +112,22 @@ export default function Login() {
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="Your Testpad password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-10 h-11"
+                  autoComplete="current-password"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="apiToken">API Token</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -120,9 +141,6 @@ export default function Login() {
                   autoComplete="off"
                 />
               </div>
-              <p className="text-sm text-muted-foreground">
-                Your Testpad API token (found in Testpad settings)
-              </p>
             </div>
 
             <Button type="submit" className="w-full h-11 text-base" disabled={loading}>

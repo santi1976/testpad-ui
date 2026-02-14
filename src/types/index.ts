@@ -1,5 +1,6 @@
 export interface User {
   email: string
+  password: string
   apiToken: string
   domain: string
   loginTime: string
@@ -7,7 +8,7 @@ export interface User {
 
 export interface AuthContextType {
   user: User | null
-  login: (email: string, apiToken: string) => Promise<User>
+  login: (email: string, password: string, apiToken: string) => Promise<User>
   logout: () => void
   isAuthenticated: boolean
   isLoading: boolean
