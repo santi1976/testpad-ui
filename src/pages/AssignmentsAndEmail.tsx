@@ -200,6 +200,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
   const [bulkTester, setBulkTester] = useState<string>('')
   const [sendingEmails, setSendingEmails] = useState(false)
   const [sendingRunIds, setSendingRunIds] = useState<Set<string>>(new Set())
+  const [sendProgress, setSendProgress] = useState<{ current: number; total: number; sentRunIds: Set<string> }>({ current: 0, total: 0, sentRunIds: new Set() })
   const [confirmModalOpen, setConfirmModalOpen] = useState(false)
   const [confirmTester, setConfirmTester] = useState<string | null>(null)
   const [excludedTesters, setExcludedTesters] = useState<Set<string>>(loadExcludedTesters)
@@ -631,6 +632,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
     }
 
     setSendingEmails(true)
+    setSendProgress({ current: 0, total: runsToSend.length, sentRunIds: new Set() })
     let successCount = 0
     let errorCount = 0
     const failedRuns: { runNumber: number; tester: string; error: string }[] = []
@@ -653,6 +655,11 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
         console.log(`[Email ${i + 1}/${totalToSend}] run #${run.runNumber} → ${testerEmail}`)
         markEmailSent(String(run.scriptId), String(run.runId), testerEmail)
         successCount++
+        setSendProgress((prev) => {
+          const next = new Set(prev.sentRunIds)
+          next.add(run.id)
+          return { current: i + 1, total: totalToSend, sentRunIds: next }
+        })
         setRunAssignments((prev) => {
           const next = { ...prev }
           delete next[run.id]
@@ -674,6 +681,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
 
     toast.dismiss('email-progress')
     setSendingEmails(false)
+    setSendProgress({ current: 0, total: 0, sentRunIds: new Set() })
 
     console.log(`[Email Batch] Sent: ${successCount}/${totalToSend}`)
     if (failedRuns.length > 0) {
@@ -961,7 +969,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                           <div key={run.id} className="flex items-center gap-2 py-0.5 text-[11px] text-green-700">
                             <span className="text-blue-500 font-semibold">#{run.runNumber}</span>
                             <span className="flex-1">{run.scriptName}</span>
-                            <span className="text-green-500 text-[10px]">
+                            <span className="text-orange-600 font-bold text-[11px]">
                               → {getEmailRecipient(String(run.scriptId), String(run.runId)) || run.tester || '?'}
                             </span>
                           </div>
@@ -976,16 +984,16 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
         )}
 
         {/* ── Split Panel ─────────────────────────────────────────────── */}
-        <div className="grid grid-cols-[1fr_40px_1fr] mb-6" style={{ minHeight: '400px' }}>
+        <div className="grid grid-cols-[1fr_40px_1fr] items-stretch mb-6" style={{ minHeight: '700px' }}>
           {/* LEFT: Unassigned */}
-          <div className="rounded-xl border-2 border-amber-400 bg-white flex flex-col overflow-hidden">
-            <div className="px-3.5 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
-              <span className="text-sm font-bold text-amber-900">Unassigned</span>
-              <span className="text-xs font-semibold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full">
+          <div className="rounded-xl border-[3px] border-orange-400 bg-white flex flex-col overflow-hidden shadow-lg" style={{ maxHeight: '700px' }}>
+            <div className="px-4 py-3 bg-orange-50 border-b border-orange-200 flex items-center justify-between flex-shrink-0">
+              <span className="text-base font-bold text-orange-900">Unassigned</span>
+              <span className="text-xs font-bold bg-orange-500 text-white min-w-[28px] h-7 flex items-center justify-center rounded-full font-mono">
                 {totalUnassigned}
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto max-h-[500px]">
+            <div className="flex-1 overflow-y-auto">
               {unassignedRuns.length === 0 ? (
                 <p className="text-center py-10 text-sm text-gray-400">No unassigned runs</p>
               ) : (
@@ -993,8 +1001,8 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                   <div
                     key={run.id}
                     className={cn(
-                      'flex items-center gap-2 px-4 py-1.5 border-b border-gray-50 text-xs hover:bg-gray-50 cursor-pointer',
-                      selectedRunIds.has(run.id) && 'bg-blue-50'
+                      'flex items-center gap-3 px-5 py-2.5 min-h-[46px] border-b border-gray-100 text-sm hover:bg-orange-50/50 cursor-pointer transition-colors',
+                      selectedRunIds.has(run.id) && 'bg-orange-50'
                     )}
                     onClick={() => toggleRunSelection(run.id)}
                   >
@@ -1005,24 +1013,24 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                     <Badge
                       variant="outline"
                       className={cn(
-                        'text-[9px] px-1.5 py-0 flex-shrink-0',
-                        isLatestRelease(run) ? 'bg-green-50 text-green-700 border-green-200' : 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                        'text-[10px] px-2 py-0.5 flex-shrink-0 font-bold font-mono',
+                        isLatestRelease(run) ? 'bg-green-50 text-green-700 border-green-300' : 'bg-orange-50 text-orange-700 border-orange-300'
                       )}
                     >
                       {run.folderName}
                     </Badge>
-                    <span className="text-gray-600 truncate min-w-0 flex-1">{run.scriptName}</span>
-                    <span className="text-blue-500 font-semibold whitespace-nowrap flex-shrink-0 text-[11px]">Run #{run.runNumber}</span>
+                    <span className="text-gray-700 truncate min-w-0 flex-1 font-medium">{run.scriptName}</span>
+                    <span className="text-orange-600 font-bold whitespace-nowrap flex-shrink-0 text-sm font-mono">Run #{run.runNumber}</span>
                   </div>
                 ))
               )}
             </div>
-            <div className="px-3.5 py-2.5 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-              <label className="text-[11px] text-gray-500 cursor-pointer flex items-center gap-1 flex-shrink-0">
+            <div className="px-4 py-3 border-t-2 border-gray-200 bg-gray-50 flex items-center gap-3 flex-shrink-0">
+              <label className="text-xs text-gray-600 cursor-pointer flex items-center gap-1.5 flex-shrink-0 font-medium">
                 <Checkbox
                   checked={unassignedRuns.length > 0 && unassignedRuns.every((r) => selectedRunIds.has(r.id))}
                   onCheckedChange={toggleSelectAllUnassigned}
-                  className="h-3 w-3"
+                  className="h-4 w-4"
                 />
                 Select All
               </label>
@@ -1033,48 +1041,61 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                 placeholder={testersLoading ? 'Loading...' : 'Assign to...'}
                 searchPlaceholder="Search testers..."
                 emptyMessage={testersLoading ? 'Loading...' : 'No tester found.'}
-                triggerClassName="w-[180px] h-7 text-xs"
+                triggerClassName="flex-1 min-w-0 h-9 text-sm"
                 disabled={testersLoading}
               />
               <Button
-                size="sm"
                 onClick={applyBulkTester}
                 disabled={!bulkTester || selectedCount === 0}
-                className="bg-blue-500 hover:bg-blue-600 text-xs h-7 px-3"
+                className="bg-orange-500 hover:bg-orange-600 text-sm font-bold h-10 min-w-[200px] px-5 flex-shrink-0 shadow-md"
               >
-                Move {selectedCount} <ArrowRight className="h-3 w-3 ml-1" />
+                Assign {selectedCount} to {bulkTester ? displayNameFromEmail(bulkTester) : '...'} <ArrowRight className="h-4 w-4 ml-1" />
               </Button>
             </div>
           </div>
 
           {/* Arrow */}
-          <div className="flex items-center justify-center text-gray-300 text-2xl">
-            <ArrowRight className="h-6 w-6" />
+          <div className="flex items-center justify-center">
+            <ArrowRight className="h-8 w-8 text-gray-400" />
           </div>
 
           {/* RIGHT: Assigned */}
-          <div className="rounded-xl border-2 border-green-500 bg-white flex flex-col overflow-hidden">
-            <div className="px-3.5 py-2.5 bg-green-50 border-b border-green-200 flex items-center justify-between">
-              <span className="text-sm font-bold text-green-800">Assigned</span>
-              <span className="text-xs font-semibold bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
+          <div className="rounded-xl border-[3px] border-green-500 bg-white flex flex-col overflow-hidden shadow-lg" style={{ maxHeight: '700px' }}>
+            <div className="px-4 py-3 bg-green-100 border-b border-green-200 flex items-center justify-between flex-shrink-0">
+              <span className="text-base font-bold text-green-800">Assigned</span>
+              <span className="text-xs font-bold bg-green-600 text-white min-w-[28px] h-7 flex items-center justify-center rounded-full font-mono">
                 {totalAssigned}
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto max-h-[500px] px-3.5">
+            <div className="flex-1 overflow-y-auto px-4 py-2">
               {assignedByTester.length === 0 ? (
                 <p className="text-center py-10 text-sm text-gray-400">No assigned runs yet</p>
               ) : (
                 assignedByTester.map((group) => (
                   <div key={group.email}>
-                    <div className="text-xs font-semibold text-gray-700 py-2 border-b border-gray-200 mt-1 first:mt-0">
-                      {group.displayName} — {group.email.split('@')[0]}@ ({group.totalRuns})
+                    <div className="flex items-center justify-between py-2.5 border-b-2 border-gray-200 mt-2 first:mt-0">
+                      <span className="text-sm font-bold text-gray-800">
+                        {group.displayName} <span className="text-gray-400 font-normal text-xs">— {group.email} ({group.totalRuns})</span>
+                      </span>
+                      <button
+                        onClick={() => {
+                          const next = { ...runAssignments }
+                          group.runs.forEach((r) => { next[r.id] = '' })
+                          setRunAssignments(next)
+                        }}
+                        className="w-7 h-7 rounded-md border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 hover:border-red-400 flex items-center justify-center flex-shrink-0 transition-colors"
+                        disabled={sendingEmails}
+                        title={`Unassign all from ${group.displayName}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                     {group.releaseGroups.map((rg) => (
                       <div key={rg.name}>
                         <div
                           className={cn(
-                            'text-[10px] font-medium mt-1.5 ml-1 px-1.5 py-0.5 rounded inline-block',
-                            rg.isLatest ? 'text-green-700 bg-green-50' : 'text-yellow-700 bg-yellow-50'
+                            'text-[10px] font-bold font-mono mt-2 ml-1 px-2 py-1 rounded inline-block border',
+                            rg.isLatest ? 'text-green-700 bg-green-50 border-green-300' : 'text-orange-700 bg-orange-50 border-orange-300'
                           )}
                         >
                           {rg.name}
@@ -1083,15 +1104,24 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                           <div
                             key={run.id}
                             className={cn(
-                              'flex items-center gap-1.5 py-1 ml-1 text-[11px] border-b border-gray-50',
+                              'flex items-center gap-2.5 py-2 px-3 mb-1.5 rounded-lg bg-green-50 border border-green-200 text-sm',
                               sendingRunIds.has(run.id) && 'opacity-50'
                             )}
                           >
-                            <span className="flex-1 text-gray-500 truncate">{run.scriptName}</span>
-                            <span className="text-blue-500 font-semibold whitespace-nowrap flex-shrink-0 text-[11px]">Run #{run.runNumber}</span>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                'text-[10px] px-2 py-0.5 flex-shrink-0 font-bold font-mono',
+                                isLatestRelease(run) ? 'bg-green-50 text-green-700 border-green-300' : 'bg-orange-50 text-orange-700 border-orange-300'
+                              )}
+                            >
+                              {run.folderName}
+                            </Badge>
+                            <span className="flex-1 text-gray-700 truncate font-medium">{run.scriptName}</span>
+                            <span className="text-green-700 font-bold whitespace-nowrap flex-shrink-0 font-mono">Run #{run.runNumber}</span>
                             <button
                               onClick={() => unassignRun(run.id)}
-                              className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
+                              className="w-6 h-6 rounded-full border border-gray-200 bg-white text-gray-400 hover:text-red-500 hover:border-red-300 hover:bg-red-50 transition-colors flex-shrink-0 flex items-center justify-center"
                               disabled={sendingEmails}
                             >
                               <X className="h-3 w-3" />
@@ -1118,9 +1148,9 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                 const avatarColor = AVATAR_COLORS[gi % AVATAR_COLORS.length]
                 const workloadPct = Math.round((group.totalRuns / maxRunsPerTester) * 100)
                 return (
-                  <div key={group.email} className="bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col" style={{ height: '280px' }}>
+                  <div key={group.email} className="bg-white border-2 border-gray-200 rounded-xl overflow-hidden flex flex-col shadow-lg" style={{ height: '300px' }}>
                     {/* Card Header */}
-                    <div className="px-3.5 py-2.5 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
+                    <div className="px-4 py-3 flex items-center justify-between border-b-2 border-gray-200 bg-gray-50 flex-shrink-0">
                       <div className="flex items-center gap-2">
                         <div
                           className={cn(
@@ -1136,56 +1166,94 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                           <div className="text-[10px] text-gray-400">{group.email}</div>
                         </div>
                       </div>
-                      <span className="text-lg font-bold">{group.totalRuns}</span>
+                      <span className="text-xl font-bold font-mono text-green-700">{group.totalRuns}</span>
+                      <button
+                        onClick={() => {
+                          const next = { ...runAssignments }
+                          group.runs.forEach((r) => { next[r.id] = '' })
+                          setRunAssignments(next)
+                        }}
+                        className="w-7 h-7 rounded-full border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 hover:border-red-400 flex items-center justify-center flex-shrink-0 transition-colors ml-2"
+                        disabled={sendingEmails}
+                        title={`Unassign all from ${group.displayName}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     </div>
 
                     {/* Card Body — fixed height, internal scroll */}
                     <div className="px-3.5 py-1 flex-1 overflow-y-auto">
-                      {group.runs.map((run) => (
-                        <div key={run.id} className="flex items-center gap-1.5 py-1 text-[11px] border-b border-gray-50 last:border-0">
-                          <span className="flex-1 text-gray-500 truncate">{run.scriptName}</span>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              'text-[8px] px-1 py-0 flex-shrink-0',
-                              isLatestRelease(run) ? 'bg-green-50 text-green-700 border-green-200' : 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                            )}
-                          >
-                            {run.folderName}
-                          </Badge>
-                          <span className="text-blue-500 font-semibold whitespace-nowrap flex-shrink-0">Run #{run.runNumber}</span>
-                          <button
-                            onClick={() => unassignRun(run.id)}
-                            className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
+                      {group.runs.map((run) => {
+                        const isSending = sendingRunIds.has(run.id)
+                        const wasSent = sendProgress.sentRunIds.has(run.id)
+                        return (
+                          <div key={run.id} className={cn(
+                            'flex items-center gap-2 py-1.5 text-xs border-b border-gray-100 last:border-0 transition-all',
+                            isSending && 'bg-orange-50',
+                            wasSent && 'bg-green-50'
+                          )}>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                'text-[9px] px-1.5 py-0 flex-shrink-0 font-bold font-mono',
+                                isLatestRelease(run) ? 'bg-green-50 text-green-700 border-green-300' : 'bg-orange-50 text-orange-700 border-orange-300'
+                              )}
+                            >
+                              {run.folderName}
+                            </Badge>
+                            <span className="flex-1 text-gray-600 truncate">{run.scriptName}</span>
+                            <span className="text-green-700 font-bold whitespace-nowrap flex-shrink-0 font-mono text-xs">Run #{run.runNumber}</span>
+                            {isSending && <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500 flex-shrink-0" />}
+                            {wasSent && <CheckCircle className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />}
+                          </div>
+                        )
+                      })}
                     </div>
 
                     {/* Card Footer */}
-                    <div className="px-3.5 py-2 border-t border-gray-100 flex items-center flex-shrink-0">
-                      <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden mr-2.5">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${workloadPct}%`,
-                            backgroundColor: WORKLOAD_COLORS[gi % WORKLOAD_COLORS.length],
+                    <div className="px-4 py-3 border-t-2 border-gray-200 bg-gray-50 flex flex-col gap-2 flex-shrink-0">
+                      {sendingEmails && sendProgress.total > 0 && group.runs.some((r) => sendingRunIds.has(r.id) || sendProgress.sentRunIds.has(r.id)) && (
+                        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-500"
+                            style={{ width: `${Math.round((sendProgress.current / sendProgress.total) * 100)}%` }}
+                          />
+                        </div>
+                      )}
+                      <div className="flex items-center">
+                        <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden mr-3">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${workloadPct}%`,
+                              backgroundColor: WORKLOAD_COLORS[gi % WORKLOAD_COLORS.length],
+                            }}
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setConfirmTester(group.email)
+                            setConfirmModalOpen(true)
                           }}
-                        />
+                          disabled={sendingEmails || group.runs.filter((r) => r.state === 'new').length === 0}
+                          className={cn(
+                            'text-xs h-8 px-4 font-bold transition-all',
+                            sendingEmails && group.runs.some((r) => sendingRunIds.has(r.id))
+                              ? 'bg-orange-500 hover:bg-orange-600'
+                              : 'bg-green-500 hover:bg-green-600'
+                          )}
+                        >
+                          {sendingEmails && group.runs.some((r) => sendingRunIds.has(r.id)) ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                              Sending {sendProgress.current}/{sendProgress.total}...
+                            </>
+                          ) : (
+                            <>Send {group.runs.filter((r) => r.state === 'new').length}</>
+                          )}
+                        </Button>
                       </div>
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setConfirmTester(group.email)
-                          setConfirmModalOpen(true)
-                        }}
-                        disabled={sendingEmails || group.runs.filter((r) => r.state === 'new').length === 0}
-                        className="bg-green-500 hover:bg-green-600 text-[11px] h-7 px-2.5"
-                      >
-                        Send {group.runs.filter((r) => r.state === 'new').length}
-                      </Button>
                     </div>
                   </div>
                 )
@@ -1196,7 +1264,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
 
         {/* ── Send All Bar ────────────────────────────────────────────── */}
         {totalAssigned > 0 && (
-          <div className="bg-white border-2 border-green-500 rounded-xl px-5 py-4 flex items-center justify-between flex-wrap gap-3 mb-5">
+          <div className="bg-green-50 border-[3px] border-green-500 rounded-xl px-6 py-5 flex items-center justify-between flex-wrap gap-3 mb-5 shadow-lg">
             <div>
               <div className="text-[15px] font-semibold">
                 Send all: <span className="text-green-600">{totalAssigned} runs</span> to{' '}
@@ -1216,10 +1284,22 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                 setConfirmModalOpen(true)
               }}
               disabled={sendingEmails || allAssignedRuns.filter((r) => r.state === 'new').length === 0}
-              className="bg-green-500 hover:bg-green-600 font-semibold text-sm px-7"
+              className={cn(
+                'font-bold text-sm px-7 transition-all',
+                sendingEmails ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-500 hover:bg-green-600'
+              )}
             >
-              <Send className="mr-2 h-4 w-4" />
-              Send All {allAssignedRuns.filter((r) => r.state === 'new').length} Assignments
+              {sendingEmails ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending {sendProgress.current}/{sendProgress.total}...
+                </>
+              ) : (
+                <>
+                  <Send className="mr-2 h-4 w-4" />
+                  Send All {allAssignedRuns.filter((r) => r.state === 'new').length} Assignments
+                </>
+              )}
             </Button>
           </div>
         )}

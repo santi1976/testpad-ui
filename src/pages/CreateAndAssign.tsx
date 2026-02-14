@@ -498,7 +498,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
           {/* Tabs */}
           <div className="flex border-b border-gray-200">
             <button
-              className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-500 text-blue-600"
+              className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-orange-500 text-orange-600"
             >
               Create Runs
             </button>
@@ -518,7 +518,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
           <div className="flex items-center gap-3">
             <div className={cn(
               'w-7 h-7 rounded-full flex items-center justify-center text-sm font-semibold',
-              currentStep >= 0 ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'
+              currentStep >= 0 ? 'bg-orange-500 text-white' : 'bg-gray-200 text-gray-500'
             )}>
               1
             </div>
@@ -531,7 +531,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
           <div className="flex items-center gap-3">
             <div className={cn(
               'w-7 h-7 rounded-full flex items-center justify-center text-sm font-semibold',
-              currentStep >= 1 ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500'
+              currentStep >= 1 ? 'bg-orange-500 text-white' : 'bg-gray-200 text-gray-500'
             )}>
               2
             </div>
@@ -621,8 +621,8 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
             {/* Two Columns */}
             <div className="grid grid-cols-2 gap-4">
               {/* Left: Available Scripts */}
-              <div className="border rounded-md overflow-hidden">
-                <div className="px-3 py-2 bg-gray-50 border-b flex justify-between items-center">
+              <div className="border-2 border-gray-200 rounded-xl overflow-hidden shadow-lg">
+                <div className="px-4 py-3 bg-gray-50 border-b-2 border-gray-200 flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={
@@ -655,7 +655,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                       placeholder="Search test suites..."
                       value={scriptSearchTerm}
                       onChange={(e) => setScriptSearchTerm(e.target.value)}
-                      className="pl-10 border-2 border-blue-300 focus:border-blue-500 focus:ring-blue-500"
+                      className="pl-10 border-2 border-orange-300 focus:border-orange-500 focus:ring-orange-500"
                     />
                   </div>
                   {scriptSearchTerm && (
@@ -667,7 +667,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                 </div>
 
                 {/* List */}
-                <div className="h-[320px] overflow-y-auto">
+                <div className="h-[400px] overflow-y-auto">
                   {filteredScripts.length === 0 ? (
                     <p className="text-center py-10 text-muted-foreground">No scripts</p>
                   ) : (
@@ -681,8 +681,8 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                           key={script.id}
                           onClick={() => toggleScript(script.id)}
                           className={cn(
-                            'px-3 py-2.5 cursor-pointer border-b hover:bg-gray-50 transition-colors',
-                            isSelected && 'bg-blue-50'
+                            'px-4 py-3 cursor-pointer border-b border-gray-100 hover:bg-orange-50/50 transition-colors',
+                            isSelected && 'bg-orange-50 border-l-[3px] border-l-orange-400'
                           )}
                         >
                           <div className="flex items-start">
@@ -692,16 +692,18 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                                 <span className="font-medium text-sm text-gray-900">{script.name}</span>
                                 <Badge
                                   variant="outline"
-                                  className="text-[10px] bg-green-50 text-green-700 border-green-200"
+                                  className={cn(
+                                    'text-[10px] font-bold font-mono',
+                                    isLatestRelease ? 'bg-green-50 text-green-700 border-green-300' : 'bg-orange-50 text-orange-700 border-orange-300'
+                                  )}
                                 >
-                                  <Check className="h-3 w-3 mr-1" />
                                   {script.folder?.name || 'Unknown'}
                                 </Badge>
-                                <span className="text-xs text-blue-500 hover:underline cursor-pointer">
-                                  Will create Run #{nextRunNumber}
+                                <span className="text-xs text-orange-600 font-bold font-mono">
+                                  Run #{nextRunNumber}
                                 </span>
                               </div>
-                              <p className="text-xs text-muted-foreground">
+                              <p className="text-xs text-gray-500">
                                 {selectedProject?.name}
                               </p>
                             </div>
@@ -719,14 +721,14 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
               {/* Right: Selected Scripts */}
               <div
                 className={cn(
-                  'border rounded-lg overflow-hidden',
-                  selectedScripts.length > 0 ? 'border-green-300' : 'border-gray-200'
+                  'rounded-xl overflow-hidden shadow-lg',
+                  selectedScripts.length > 0 ? 'border-[3px] border-green-500' : 'border-2 border-gray-200'
                 )}
               >
                 <div
                   className={cn(
-                    'px-3 py-2 border-b flex justify-between items-center',
-                    selectedScripts.length > 0 ? 'bg-white' : 'bg-gray-50'
+                    'px-4 py-3 border-b-2 flex justify-between items-center',
+                    selectedScripts.length > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
                   )}
                 >
                   <div className="flex items-center gap-2">
@@ -747,7 +749,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                   )}
                 </div>
 
-                <div className="h-[280px] overflow-y-auto bg-white">
+                <div className="h-[400px] overflow-y-auto bg-white">
                   {selectedScripts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-gray-400">
                       <svg className="h-16 w-16 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -764,22 +766,24 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                       return (
                         <div
                           key={script.id}
-                          className="px-3 py-2.5 border-b border-l-4 border-l-green-500"
+                          className="px-4 py-3 border-b border-gray-100 border-l-4 border-l-green-500"
                         >
                           <div className="flex items-start">
-                            <Check className="h-4 w-4 text-green-500 mr-2 mt-0.5" />
+                            <Check className="h-4 w-4 text-green-600 mr-2 mt-0.5" />
                             <div className="flex-1">
                               <div className="flex items-center gap-2 flex-wrap mb-1">
-                                <span className="font-medium text-sm text-gray-900">{script.name}</span>
+                                <span className="font-semibold text-sm text-gray-900">{script.name}</span>
                                 <Badge
                                   variant="outline"
-                                  className="text-[10px] bg-green-50 text-green-700 border-green-200"
+                                  className={cn(
+                                    'text-[10px] font-bold font-mono',
+                                    isLatestRelease ? 'bg-green-50 text-green-700 border-green-300' : 'bg-orange-50 text-orange-700 border-orange-300'
+                                  )}
                                 >
-                                  <Check className="h-3 w-3 mr-1" />
                                   {script.folder?.name}
                                 </Badge>
-                                <span className="text-xs text-blue-500 hover:underline cursor-pointer">
-                                  Will create Run #{nextRunNumber}
+                                <span className="text-xs text-orange-600 font-bold font-mono">
+                                  Run #{nextRunNumber}
                                 </span>
                               </div>
                               <p className="text-xs text-muted-foreground">
@@ -804,17 +808,20 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                   </p>
                 </div>
 
-                <div className="p-3 border-t">
+                <div className="p-4 border-t-2 border-gray-200">
                   <Button
                     onClick={handleCreateRuns}
                     disabled={selectedScripts.length === 0 || createRunsMutation.isPending}
-                    className="w-full"
+                    className={cn(
+                      'w-full h-12 text-base font-bold shadow-md',
+                      selectedScripts.length > 0 ? 'bg-orange-500 hover:bg-orange-600' : ''
+                    )}
                     variant={selectedScripts.length > 0 ? 'default' : 'outline'}
                   >
                     {createRunsMutation.isPending && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                     )}
-                    <Plus className="mr-2 h-4 w-4" />
+                    <Plus className="mr-2 h-5 w-5" />
                     Create {selectedScripts.length} Run(s)
                   </Button>
                 </div>
@@ -858,7 +865,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                       releaseId: selectedReleaseFilter,
                     }
                   })}
-                  className="bg-blue-600 hover:bg-blue-700"
+                  className="bg-orange-500 hover:bg-orange-600"
                 >
                   Batch Assignments
                   <ArrowRight className="ml-1 h-3.5 w-3.5" />
@@ -1093,7 +1100,7 @@ export default function CreateAndAssign({ embedded = false }: CreateAndAssignPro
                 }}
                 className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-orange-500 text-white'
                     : item.disabled
                     ? 'text-gray-500 cursor-not-allowed'
                     : 'text-gray-300 hover:bg-gray-800'
