@@ -10,27 +10,18 @@ export async function assignAndSendEmail(
   scriptId: number | string,
   runId: number | string,
   targetEmail: string,
-  scriptName: string
+  scriptName: string,
+  senderEmail?: string,
+  senderPassword?: string
 ): Promise<AssignAndSendEmailResponse> {
   console.log('[assignAndSendEmail] Starting...')
   console.log(`  scriptId: ${scriptId}`)
   console.log(`  runId: ${runId}`)
   console.log(`  targetEmail: ${targetEmail}`)
   console.log(`  scriptName: ${scriptName}`)
+  console.log(`  sender: ${senderEmail}`)
 
   try {
-    // Read logged-in user's credentials
-    let senderEmail: string | undefined
-    let senderPassword: string | undefined
-    try {
-      const storedUser = localStorage.getItem('testpad_user')
-      if (storedUser) {
-        const userData = JSON.parse(storedUser)
-        senderEmail = userData.email
-        senderPassword = userData.password
-      }
-    } catch { /* ignore */ }
-
     const response = await fetch('/api/assign-and-send', {
       method: 'POST',
       headers: {

@@ -17,8 +17,8 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { useAuth } from '../contexts/AuthContext'
 import { apiGet } from '../utils/api'
+import { Sidebar } from '../components/layout/Sidebar'
 import { useGlobalTesters } from '../contexts/TestersContext'
 import { normalizeTester, sortTesters } from '../utils/normalizeTester'
 import { hasEmailSent, getEmailRecipient } from '../utils/emailTracking'
@@ -38,33 +38,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { cn } from '@/lib/utils'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 
-// Create URL-friendly slug from name
-function createSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
+import { getInitials, formatDate, createSlug } from '@/utils/helpers'
+import { Project, Folder, FolderItem, Run as GlobalRun, RunProgress as GlobalRunProgress } from '@/types'
 
-// Types
-interface Project {
-  id: number | string
-  name: string
-}
-
-interface Folder {
-  id: number | string
-  name: string
-  type?: string
-  contents?: FolderItem[]
-}
-
-interface FolderItem {
-  id: number | string
-  name: string
-  type: 'folder' | 'script'
-  contents?: FolderItem[]
-}
 
 interface UserInfo {
   email: string
@@ -73,7 +49,7 @@ interface UserInfo {
   isGuest: boolean
 }
 
-interface RunProgress {
+interface RunProgress extends GlobalRunProgress {
   total: number
   pass: number
   fail: number
@@ -95,7 +71,7 @@ interface TestIssue {
   status: 'fail' | 'block'
 }
 
-interface Run {
+interface Run extends Omit<any, 'project' | 'folder' | 'script' | 'progress' | 'id'> {
   id: string | number
   project: Project
   folder: Folder | null
@@ -106,6 +82,8 @@ interface Run {
   results: Record<string, string | { result: string }>
   state: string | null
   created: string
+  emailSentTo?: string
+  // Restoring fields from GlobalRun that are used in the code
   headers?: Record<string, string>
   assignee?: { id?: string; email?: string; name?: string }
   label?: string
@@ -116,7 +94,6 @@ interface Run {
     fields?: Record<string, string>
     emailSentTo?: string
   }
-  emailSentTo?: string
 }
 
 interface ScriptGroup {
@@ -150,15 +127,6 @@ function formatElapsedTime(created: string | undefined): string {
   }
 }
 
-// Get initials from email for avatar
-function getInitials(email: string | undefined): string {
-  if (!email) return '?'
-  const parts = email.split('@')[0].split('.')
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return email.substring(0, 2).toUpperCase()
-}
 
 // Get tests with issues (failed or blocked) from a run
 function getTestsWithIssues(run: Run): TestIssue[] {
@@ -210,7 +178,6 @@ function calculateProgressFromResults(
 export default function TestRuns() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout } = useAuth()
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [selectedUser, setSelectedUser] = useState<string>('all')
   const [selectedState, setSelectedState] = useState<string>('all')
@@ -227,23 +194,6 @@ export default function TestRuns() {
   const [isLoadingProgressive, setIsLoadingProgressive] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
-  const navItems = [
-    { key: 'dashboard', label: 'Dashboard', path: '/', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
-    { key: 'divider1', label: 'Test Execution', type: 'divider' },
-    { key: 'create-run', label: 'Create Run', path: '/create-run', icon: 'M12 6v6m0 0v6m0-6h6m-6 0H6' },
-    { key: 'assignments', label: 'Assignments & Email', path: '/assignments', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
-    { key: 'divider-management', label: 'Test Management', type: 'divider' },
-    { key: 'test-suites', label: 'Test Suites', path: '/test-suites', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
-    { key: 'test-runs', label: 'Test Runs', path: '/test-runs', icon: 'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { key: 'divider2', type: 'separator' },
-    { key: 'reports', label: 'Reports', path: '#', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', disabled: true, badge: 'FUTURE' },
-    { key: 'settings', label: 'Settings', path: '/settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
-  ]
-
-  const handleSignOut = () => {
-    logout()
-    navigate('/login')
-  }
 
   // Cache key for localStorage
   const getCacheKey = () => {
@@ -258,7 +208,7 @@ export default function TestRuns() {
     queryFn: () => apiGet('/api/v1/projects'),
   })
 
-  const projects: Project[] = projectsData?.projects || []
+  const projects: Project[] = (projectsData as any)?.projects || []
 
   // Compute activeProject
   const activeProject =
@@ -285,7 +235,7 @@ export default function TestRuns() {
     queryFn: async () => {
       if (!activeProject) return { folders: [], releases: [] }
       const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`)
-      const folders = response?.folders || []
+      const folders = (response as any)?.folders || []
 
       const releases = folders
         .filter((item: FolderItem) => item.type === 'folder')
@@ -302,8 +252,8 @@ export default function TestRuns() {
     staleTime: 5 * 60 * 1000,
   })
 
-  const folderReleases: Folder[] = foldersData?.releases || []
-  const allFoldersData: FolderItem[] = foldersData?.folders || []
+  const folderReleases: Folder[] = (foldersData as any)?.releases || []
+  const allFoldersData: FolderItem[] = (foldersData as any)?.folders || []
 
   // Get testers from global context (loaded once, cached in localStorage)
   const { testers: historicalTesters, isLoading: testersLoading } = useGlobalTesters()
@@ -417,14 +367,7 @@ export default function TestRuns() {
           const results = await Promise.allSettled(
             batch.map(async ({ script, folder }) => {
               const scriptData = await apiGet(`/api/v1/scripts/${script.id}`)
-              return { script, folder, scriptData }
-            })
-          )
-
-          results.forEach((result) => {
-            if (result.status === 'fulfilled' && result.value) {
-              const { script, folder, scriptData } = result.value
-              const scriptDetails = scriptData?.script || scriptData
+              const scriptDetails = (scriptData as any)?.script || scriptData
 
               if (
                 scriptDetails.runs &&
@@ -523,8 +466,8 @@ export default function TestRuns() {
                   })
                 })
               }
-            }
-          })
+            })
+          )
 
           if (!cancelled && allRuns.length > 0) {
             setProgressiveRuns([...allRuns])
@@ -558,7 +501,7 @@ export default function TestRuns() {
     return () => {
       cancelled = true
     }
-  }, [activeProject?.id, releaseToLoad, allFoldersData])
+  }, [activeProject?.id, releaseToLoad, allFoldersData as any])
 
   const allRuns = progressiveRuns
   const isLoading = isLoadingProgressive && progressiveRuns.length === 0
@@ -609,6 +552,7 @@ export default function TestRuns() {
 
       const hasIssues = block > 0 || fail > 0
 
+      if (selectedState === 'new' && effectiveState !== 'new') return false
       if (selectedState === 'active' && effectiveState !== 'started') return false
       if (selectedState === 'completed' && effectiveState !== 'completed') return false
       if (selectedState === 'blocked' && !hasIssues) return false
@@ -743,6 +687,18 @@ export default function TestRuns() {
       (run.progress && run.progress.fail > 0) || (run.progress && run.progress.block > 0)
   )
 
+  // Card pastel color by state
+  const getCardColors = (run: Run): string => {
+    const progress = run.progress || { total: 0, pass: 0, fail: 0, block: 0 }
+    const hasFails = (progress.fail || 0) > 0
+    const hasBlocks = (progress.block || 0) > 0
+    if (hasFails) return 'bg-red-200 border-2 border-red-400'
+    if (hasBlocks) return 'bg-gray-300/60 border-2 border-gray-400'
+    if (run.state === 'completed') return 'bg-green-100/80 border-2 border-green-300'
+    if (run.state === 'started') return 'bg-blue-100/80 border-2 border-blue-300'
+    return 'bg-white border-2 border-gray-200'
+  }
+
   // State color helper
   const getStateVariant = (
     run: Run
@@ -763,117 +719,41 @@ export default function TestRuns() {
     return null
   }
 
-  const formatDate = (dateStr: string | undefined): string => {
-    if (!dateStr) return 'N/A'
-    try {
-      const date = new Date(dateStr)
-      return date.toLocaleDateString('en-US', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      })
-    } catch {
-      return 'N/A'
-    }
-  }
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Navigation Sidebar */}
-      <aside className="w-64 text-white flex flex-col flex-shrink-0" style={{ backgroundColor: '#121827' }}>
-        <div className="p-4 border-b border-gray-700">
-          <h2 className="font-bold text-lg">Testpad Admin</h2>
-          <p className="text-xs text-gray-400 mt-1">{user?.email || 'user@bitfinex.com'}</p>
-        </div>
-        <nav className="flex-1 p-4 space-y-2">
-          {navItems.map((item) => {
-            if (item.type === 'divider') {
-              return (
-                <div key={item.key} className="pt-2">
-                  <p className="px-4 text-xs text-gray-500 uppercase tracking-wider mb-2">{item.label}</p>
-                </div>
-              )
-            }
-            if (item.type === 'separator') {
-              return <div key={item.key} className="border-t border-gray-700 my-4" />
-            }
-            const isActive = location.pathname === item.path
-            return (
-              <a
-                key={item.key}
-                href={item.disabled ? undefined : item.path}
-                onClick={(e) => {
-                  if (item.disabled) {
-                    e.preventDefault()
-                    return
-                  }
-                  e.preventDefault()
-                  navigate(item.path!)
-                }}
-                className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
-                  isActive
-                    ? 'bg-blue-600 text-white'
-                    : item.disabled
-                    ? 'text-gray-500 cursor-not-allowed'
-                    : 'text-gray-300 hover:bg-gray-800'
-                }`}
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-                </svg>
-                {item.label}
-                {item.badge && (
-                  <span className="ml-auto text-xs bg-yellow-600 text-white px-1.5 py-0.5 rounded">{item.badge}</span>
-                )}
-              </a>
-            )
-          })}
-        </nav>
-        <div className="p-4 border-t border-gray-700">
-          <button
-            onClick={handleSignOut}
-            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            Sign Out
-          </button>
-        </div>
-      </aside>
+    <div className="flex h-screen bg-slate-100">
+      <Sidebar activeKey="test-runs" />
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto p-6">
         <div className="max-w-[1800px] mx-auto">
           {/* Header */}
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-gray-900">Test Runs</h1>
-            <p className="text-gray-600">Monitor and manage all test executions</p>
+            <h1 className="text-2xl font-extrabold text-gray-900">Test Runs</h1>
+            <p className="text-sm text-gray-500 mt-1">Monitor and manage all test executions</p>
           </div>
 
           {/* Global Metrics Panel */}
-          <Card className="mb-6">
-            <CardContent className="py-4">
-              <div className="grid grid-cols-4 gap-4">
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-blue-500">{stats.total}</p>
-                  <p className="text-sm text-muted-foreground">Total Runs</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-green-500">{stats.active}</p>
-                  <p className="text-sm text-muted-foreground">Active</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-yellow-500">{stats.withBlocks}</p>
-                  <p className="text-sm text-muted-foreground">With Blocks</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-red-500">{stats.withFailures}</p>
-                  <p className="text-sm text-muted-foreground">With Failures</p>
-                </div>
+          <div className="bg-white border-2 border-gray-200 rounded-xl shadow-md px-6 py-4 mb-6">
+            <div className="grid grid-cols-4 gap-4">
+              <div className="p-3 bg-gray-100 rounded-lg text-center border border-gray-200">
+                <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Total Runs</p>
+                <p className="text-2xl font-extrabold text-orange-600 font-mono">{stats.total}</p>
               </div>
-            </CardContent>
-          </Card>
+              <div className="p-3 bg-blue-50 rounded-lg text-center border-2 border-blue-300">
+                <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-1">Active</p>
+                <p className="text-2xl font-extrabold text-blue-600 font-mono">{stats.active}</p>
+              </div>
+              <div className="p-3 bg-yellow-50 rounded-lg text-center border-2 border-yellow-300">
+                <p className="text-[10px] font-semibold text-yellow-600 uppercase tracking-wide mb-1">With Blocks</p>
+                <p className="text-2xl font-extrabold text-yellow-600 font-mono">{stats.withBlocks}</p>
+              </div>
+              <div className="p-3 bg-red-50 rounded-lg text-center border-2 border-red-300">
+                <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wide mb-1">With Failures</p>
+                <p className="text-2xl font-extrabold text-red-600 font-mono">{stats.withFailures}</p>
+              </div>
+            </div>
+          </div>
 
           {/* Critical Alerts */}
           {criticalRuns.length > 0 && !isCriticalAlertsClosed && (
@@ -913,9 +793,9 @@ export default function TestRuns() {
                   const uniqueKey = `${run.project?.id || 'p'}-${run.script?.id || 's'}-${run.id || index}`
                   const displayName =
                     run.userInfo?.isGuest &&
-                    run.userInfo?.email &&
-                    run.userInfo.email !== 'guest' &&
-                    run.userInfo.email.includes('@')
+                      run.userInfo?.email &&
+                      run.userInfo.email !== 'guest' &&
+                      run.userInfo.email.includes('@')
                       ? `Guest (${run.userInfo.email.split('@')[0]})`
                       : run.userInfo?.email?.split('@')[0] || 'Unknown'
 
@@ -937,164 +817,152 @@ export default function TestRuns() {
             </div>
           )}
 
-          {/* Quick Filter */}
-          <Card className="mb-4">
-            <CardContent className="py-3">
-              <Button
-                variant={selectedState === 'blocked' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setSelectedState(selectedState === 'blocked' ? 'all' : 'blocked')
-                }}
-              >
-                Only with Issues
-              </Button>
-            </CardContent>
-          </Card>
-
           {/* Filters */}
-          <Card className="mb-6">
+          <Card className="mb-6 border-2 border-gray-200 shadow-sm">
             <CardContent className="py-4">
-              <div className="flex flex-wrap gap-4 items-center">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">Project:</span>
-                  <Select
-                    value={String(activeProject?.id || 'all')}
-                    onValueChange={(value) => {
-                      setHasManuallySelectedProject(true)
-                      if (value === 'all') {
-                        setSelectedProject(null)
-                      } else {
-                        const project = projects.find((p) => String(p.id) === value)
-                        setSelectedProject(project || null)
-                      }
+              <div className="flex gap-4 items-center">
+                <div className="flex flex-wrap gap-4 items-center flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">Project:</span>
+                    <Select
+                      value={String(activeProject?.id || 'all')}
+                      onValueChange={(value) => {
+                        setHasManuallySelectedProject(true)
+                        if (value === 'all') {
+                          setSelectedProject(null)
+                        } else {
+                          const project = projects.find((p) => String(p.id) === value)
+                          setSelectedProject(project || null)
+                        }
+                        setSelectedFolder('latest')
+                        setSelectedTestSuite(null)
+                        setSelectedRun(null)
+                      }}
+                    >
+                      <SelectTrigger className={cn(
+                        "w-[200px]",
+                        selectedProject && "bg-cyan-50 border-cyan-400"
+                      )}>
+                        <SelectValue placeholder="All projects" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All projects</SelectItem>
+                        {projects.map((project) => (
+                          <SelectItem key={project.id} value={String(project.id)}>
+                            {project.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">User:</span>
+                    <SearchableSelect
+                      options={[
+                        { value: 'all', label: 'All users' },
+                        ...users.map((user) => ({ value: user, label: user }))
+                      ]}
+                      value={selectedUser}
+                      onValueChange={setSelectedUser}
+                      placeholder={testersLoading ? "Loading..." : "All users"}
+                      searchPlaceholder="Search users..."
+                      emptyMessage={testersLoading ? "Loading..." : "No user found."}
+                      triggerClassName="w-[200px]"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">Test Suite:</span>
+                    <SearchableSelect
+                      options={[
+                        { value: 'all', label: 'All test suites' },
+                        ...testSuites.map((suite) => ({ value: String(suite.id), label: suite.name }))
+                      ]}
+                      value={selectedTestSuite || 'all'}
+                      onValueChange={(value) => {
+                        setSelectedTestSuite(value === 'all' ? null : value)
+                      }}
+                      placeholder="All test suites"
+                      searchPlaceholder="Search test suites..."
+                      triggerClassName="w-[200px]"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">Folder/Release:</span>
+                    <Select
+                      value={effectiveFolderId || selectedFolder || 'all'}
+                      onValueChange={(value) => {
+                        setSelectedFolder(value === 'all' ? 'all' : value)
+                        setSelectedTestSuite(null)
+                        setSelectedRun(null)
+                      }}
+                    >
+                      <SelectTrigger className={cn(
+                        "w-[200px]",
+                        selectedFolder && selectedFolder !== 'all' && selectedFolder !== 'latest' && "bg-cyan-50 border-cyan-400"
+                      )}>
+                        <SelectValue placeholder="All folders" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All folders</SelectItem>
+                        {folders.map((folder) => (
+                          <SelectItem key={folder.id} value={String(folder.id)}>
+                            {folder.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">Status:</span>
+                    <Select value={selectedState} onValueChange={setSelectedState}>
+                      <SelectTrigger className={cn(
+                        "w-[160px]",
+                        selectedState && selectedState !== 'all' && "bg-cyan-50 border-cyan-400"
+                      )}>
+                        <SelectValue placeholder="All" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="new">New</SelectItem>
+                        <SelectItem value="active">In Progress</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="blocked">With Issues</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedProject(null)
+                      setSelectedUser('all')
+                      setSelectedState('all')
+                      setSelectedTestSuite(null)
                       setSelectedFolder('latest')
-                      setSelectedTestSuite(null)
-                      setSelectedRun(null)
+                      setHasManuallySelectedProject(false)
                     }}
                   >
-                    <SelectTrigger className={cn(
-                      "w-[200px]",
-                      selectedProject && "bg-cyan-50 border-cyan-400"
-                    )}>
-                      <SelectValue placeholder="All projects" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All projects</SelectItem>
-                      {projects.map((project) => (
-                        <SelectItem key={project.id} value={String(project.id)}>
-                          {project.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    Reset Filters
+                  </Button>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">User:</span>
-                  <SearchableSelect
-                    options={[
-                      { value: 'all', label: 'All users' },
-                      ...users.map((user) => ({ value: user, label: user }))
-                    ]}
-                    value={selectedUser}
-                    onValueChange={setSelectedUser}
-                    placeholder={testersLoading ? "Loading..." : "All users"}
-                    searchPlaceholder="Search users..."
-                    emptyMessage={testersLoading ? "Loading..." : "No user found."}
-                    triggerClassName="w-[200px]"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">Test Suite:</span>
-                  <SearchableSelect
-                    options={[
-                      { value: 'all', label: 'All test suites' },
-                      ...testSuites.map((suite) => ({ value: String(suite.id), label: suite.name }))
-                    ]}
-                    value={selectedTestSuite || 'all'}
-                    onValueChange={(value) => {
-                      setSelectedTestSuite(value === 'all' ? null : value)
-                    }}
-                    placeholder="All test suites"
-                    searchPlaceholder="Search test suites..."
-                    triggerClassName="w-[200px]"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">Folder/Release:</span>
-                  <Select
-                    value={effectiveFolderId || selectedFolder || 'all'}
-                    onValueChange={(value) => {
-                      setSelectedFolder(value === 'all' ? 'all' : value)
-                      setSelectedTestSuite(null)
-                      setSelectedRun(null)
-                    }}
-                  >
-                    <SelectTrigger className={cn(
-                      "w-[200px]",
-                      selectedFolder && selectedFolder !== 'all' && selectedFolder !== 'latest' && "bg-cyan-50 border-cyan-400"
-                    )}>
-                      <SelectValue placeholder="All folders" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All folders</SelectItem>
-                      {folders.map((folder) => (
-                        <SelectItem key={folder.id} value={String(folder.id)}>
-                          {folder.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">Status:</span>
-                  <Select value={selectedState} onValueChange={setSelectedState}>
-                    <SelectTrigger className={cn(
-                      "w-[160px]",
-                      selectedState && selectedState !== 'all' && "bg-cyan-50 border-cyan-400"
-                    )}>
-                      <SelectValue placeholder="All" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="active">In Progress</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="blocked">With Issues</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedProject(null)
-                    setSelectedUser('all')
-                    setSelectedState('all')
-                    setSelectedTestSuite(null)
-                    setSelectedFolder('latest')
-                    setHasManuallySelectedProject(false)
-                  }}
-                >
-                  Reset Filters
-                </Button>
-
-                <div className="ml-auto flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                   <LayoutGrid
                     className={cn(
                       'h-5 w-5 cursor-pointer transition-colors',
-                      viewMode === 'grid' ? 'text-blue-500' : 'text-gray-400'
+                      viewMode === 'grid' ? 'text-orange-500' : 'text-gray-400'
                     )}
                     onClick={() => setViewMode('grid')}
                   />
                   <List
                     className={cn(
                       'h-5 w-5 cursor-pointer transition-colors',
-                      viewMode === 'horizontal' ? 'text-blue-500' : 'text-gray-400'
+                      viewMode === 'horizontal' ? 'text-orange-500' : 'text-gray-400'
                     )}
                     onClick={() => setViewMode('horizontal')}
                   />
@@ -1110,7 +978,7 @@ export default function TestRuns() {
               {/* Loading */}
               {isLoading && progressiveRuns.length === 0 && (
                 <div className="text-center py-10">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-500" />
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-orange-500" />
                   <p className="mt-4 text-muted-foreground">
                     Loading runs from all projects...
                   </p>
@@ -1120,7 +988,7 @@ export default function TestRuns() {
               {/* Loading more */}
               {isLoadingProgressive && progressiveRuns.length > 0 && (
                 <div className="text-center py-5">
-                  <Loader2 className="h-5 w-5 animate-spin mx-auto text-blue-500" />
+                  <Loader2 className="h-5 w-5 animate-spin mx-auto text-orange-500" />
                   <p className="mt-2 text-xs text-muted-foreground">
                     Loading more runs... ({progressiveRuns.length} loaded so far)
                   </p>
@@ -1155,7 +1023,7 @@ export default function TestRuns() {
               {/* Results count */}
               {!isLoading && !error && filteredRuns.length > 0 && (
                 <p className="mb-4 text-sm text-muted-foreground">
-                  Showing <span className="font-semibold text-blue-500">{filteredRuns.length}</span>{' '}
+                  Showing <span className="font-bold text-orange-600">{filteredRuns.length}</span>{' '}
                   run{filteredRuns.length !== 1 ? 's' : ''}
                   {allRuns.length !== filteredRuns.length && (
                     <span> of {allRuns.length} total</span>
@@ -1230,8 +1098,9 @@ export default function TestRuns() {
                           <Card
                             key={`${firstRun.project?.id || 'p'}-${scriptId}`}
                             className={cn(
+                              'border-2 border-gray-200 rounded-xl shadow-sm',
                               selectedRun?.script?.id === scriptGroup.script.id &&
-                                'ring-2 ring-blue-500'
+                              'ring-2 ring-orange-500'
                             )}
                           >
                             <CardContent className="py-4">
@@ -1256,7 +1125,7 @@ export default function TestRuns() {
                                     )}
                                   </Button>
                                   <span
-                                    className="font-semibold cursor-pointer hover:text-blue-500"
+                                    className="font-bold cursor-pointer hover:text-orange-600"
                                     onClick={() => {
                                       const slug = createSlug(firstRun.script.name)
                                       sessionStorage.setItem('testSuiteContext', JSON.stringify({
@@ -1347,9 +1216,9 @@ export default function TestRuns() {
                                         <div className="flex-1">
                                           <p className="font-semibold text-sm">
                                             {run.userInfo?.isGuest &&
-                                            run.userInfo?.email &&
-                                            run.userInfo.email !== 'guest' &&
-                                            run.userInfo.email.includes('@')
+                                              run.userInfo?.email &&
+                                              run.userInfo.email !== 'guest' &&
+                                              run.userInfo.email.includes('@')
                                               ? `Guest (${run.userInfo.email.split('@')[0]})`
                                               : run.userInfo?.email?.split('@')[0] || 'Unknown'}
                                           </p>
@@ -1414,10 +1283,11 @@ export default function TestRuns() {
                           percentage = Math.round((passed / total) * 100)
                         }
 
+                        const completedCount = passed + failed + blocked
                         let runState: string
-                        if (percentage === 100) {
+                        if (total > 0 && completedCount === total) {
                           runState = 'completed'
-                        } else if (percentage > 0) {
+                        } else if (completedCount > 0) {
                           runState = 'started'
                         } else {
                           runState = 'new'
@@ -1436,19 +1306,26 @@ export default function TestRuns() {
                           <div key={uniqueKey} className="relative">
                             <Card
                               className={cn(
-                                'cursor-pointer transition-all hover:shadow-md',
-                                isSelected && 'ring-2 ring-blue-500',
-                                hasIssues && !isSelected && 'border-red-300'
+                                'cursor-pointer transition-all hover:shadow-lg rounded-xl',
+                                getCardColors(run),
+                                isSelected && 'ring-2 ring-orange-500'
                               )}
                               onClick={() => setSelectedRun(run)}
                             >
                               <CardContent className="p-4">
                                 {/* Badge for issues */}
                                 {hasIssues && (
-                                  <div className="absolute -top-2 -right-2">
-                                    <Badge variant={failed > 0 ? 'destructive' : 'secondary'}>
-                                      {totalIssues} Issue{totalIssues > 1 ? 's' : ''}
-                                    </Badge>
+                                  <div className="absolute -top-2 -right-2 flex gap-1">
+                                    {failed > 0 && (
+                                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                        {failed} Bug{failed > 1 ? 's' : ''}
+                                      </Badge>
+                                    )}
+                                    {blocked > 0 && (
+                                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-gray-400 text-white">
+                                        {blocked} Block{blocked > 1 ? 's' : ''}
+                                      </Badge>
+                                    )}
                                   </div>
                                 )}
 
@@ -1457,15 +1334,15 @@ export default function TestRuns() {
                                   <div className="flex items-center gap-2">
                                     <Avatar className="h-6 w-6">
                                       <AvatarFallback className="bg-blue-500 text-white text-xs">
-                                        {getInitials(run.userInfo?.email)}
+                                        {getInitials(run.userInfo?.email || undefined)}
                                       </AvatarFallback>
                                     </Avatar>
                                     <div>
                                       <p className="text-xs font-semibold">
                                         {run.userInfo?.isGuest &&
-                                        run.userInfo?.email &&
-                                        run.userInfo.email !== 'guest' &&
-                                        run.userInfo.email.includes('@')
+                                          run.userInfo?.email &&
+                                          run.userInfo.email !== 'guest' &&
+                                          run.userInfo.email.includes('@')
                                           ? `Guest (${run.userInfo.email.split('@')[0]})`
                                           : run.userInfo?.email?.split('@')[0] || 'Unknown'}
                                       </p>
@@ -1477,15 +1354,15 @@ export default function TestRuns() {
                                   </div>
                                   {(() => {
                                     const emailWasSent = hasEmailSent(
-                                      run.script.id as number,
-                                      run.id as number
+                                      String(run.script.id),
+                                      String(run.id)
                                     )
                                     const isNew = run.state === 'new' || runState === 'new'
 
                                     if (isNew && emailWasSent) {
                                       const emailRecipient = getEmailRecipient(
-                                        run.script.id as number,
-                                        run.id as number
+                                        String(run.script.id),
+                                        String(run.id)
                                       )
                                       return (
                                         <div className="flex flex-col items-end gap-1">
@@ -1527,7 +1404,7 @@ export default function TestRuns() {
                                 <div className="mb-3">
                                   <div className="flex justify-between items-center mb-2">
                                     <span
-                                      className="text-sm font-semibold text-blue-500 cursor-pointer hover:underline"
+                                      className="text-sm font-bold text-orange-600 cursor-pointer hover:underline"
                                       onClick={(e) => {
                                         e.stopPropagation()
                                         const slug = createSlug(run.script.name)
@@ -1632,8 +1509,8 @@ export default function TestRuns() {
                                       className={cn(
                                         'w-full text-xs',
                                         failed > 0 &&
-                                          !issuesExpanded &&
-                                          'border-red-300 text-red-600 hover:bg-red-50'
+                                        !issuesExpanded &&
+                                        'border-red-300 text-red-600 hover:bg-red-50'
                                       )}
                                       onClick={(e) => {
                                         e.stopPropagation()
@@ -1785,15 +1662,15 @@ export default function TestRuns() {
                           <div className="flex items-center gap-3 mb-3">
                             <Avatar className="h-10 w-10">
                               <AvatarFallback className="bg-blue-500 text-white">
-                                {getInitials(selectedRun.userInfo?.email)}
+                                {getInitials(selectedRun.userInfo?.email || undefined)}
                               </AvatarFallback>
                             </Avatar>
                             <div>
                               <p className="font-semibold">
                                 {selectedRun.userInfo?.isGuest &&
-                                selectedRun.userInfo?.email &&
-                                selectedRun.userInfo.email !== 'guest' &&
-                                selectedRun.userInfo.email.includes('@')
+                                  selectedRun.userInfo?.email &&
+                                  selectedRun.userInfo.email !== 'guest' &&
+                                  selectedRun.userInfo.email.includes('@')
                                   ? `Guest (${selectedRun.userInfo.email})`
                                   : selectedRun.userInfo?.email || 'Unknown'}
                               </p>
@@ -1856,10 +1733,10 @@ export default function TestRuns() {
                                       ? 100
                                       : selectedRun.progress?.total > 0
                                         ? Math.round(
-                                            (selectedRun.progress.pass /
-                                              selectedRun.progress.total) *
-                                              100
-                                          )
+                                          (selectedRun.progress.pass /
+                                            selectedRun.progress.total) *
+                                          100
+                                        )
                                         : 0
                                   }
                                   className="h-3"

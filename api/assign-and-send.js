@@ -16,8 +16,8 @@ export default async function handler(req, res) {
   try {
     // Parse body if it's a string
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
-    const { scriptId, runId, targetEmail, scriptName } = body
-    
+    const { scriptId, runId, targetEmail, scriptName, senderEmail, senderPassword } = body
+
     if (!scriptId || !runId || !targetEmail || !scriptName) {
       return res.status(400).json({ error: 'Missing required fields' })
     }
@@ -27,10 +27,10 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'COMPANY_OID not configured' })
     }
 
-    // Login to Testpad (must do this on each request since serverless functions are stateless)
-    const { cookies, csrfToken } = await loginToTestpad()
+    // Login to Testpad using provided sender credentials (fallback to env if missing)
+    const { cookies, csrfToken } = await loginToTestpad(senderEmail, senderPassword)
 
-    const USERNAME = process.env.USER_TESTPAD
+    const SENDER_EMAIL = senderEmail || process.env.USER_TESTPAD
 
     // Generate ObjectId
     const timestamp = Math.floor(Date.now() / 1000).toString(16).padStart(8, '0')
@@ -95,15 +95,16 @@ export default async function handler(req, res) {
     }
 
     // Step 2: sendemail
-    const senderEmail = USERNAME
-    const senderName = senderEmail.split('@')[0].split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ')
+    const senderName = SENDER_EMAIL.split('@')[0].split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ')
+
+    console.log(`[Email] Sending for ${SENDER_EMAIL} to ${targetEmail} (Run #${runId})`)
 
     const sendemailBody = JSON.stringify({
       data: {
         to: targetEmail,
         subject: `Guest Testing Invitation: ${scriptName} (test run #${runId})`,
-        previewContents: `${senderName} (${senderEmail}) is inviting you to use Testpad as a Guest Tester.`,
-        intro: `Hi\n\n${senderName} (${senderEmail}) is inviting you to use Testpad to run through the tests in test script "${scriptName}".\nThe link below will access the bitfinex account on Testpad as a Guest Tester, so there's no registration required.\n`,
+        previewContents: `${senderName} (${SENDER_EMAIL}) is inviting you to use Testpad as a Guest Tester.`,
+        intro: `Hi\n\n${senderName} (${SENDER_EMAIL}) is inviting you to use Testpad to run through the tests in test script "${scriptName}".\nThe link below will access the bitfinex account on Testpad as a Guest Tester, so there's no registration required.\n`,
         signoff: 'Happy Testing!\n',
         expectedAssigneeId: 0
       }

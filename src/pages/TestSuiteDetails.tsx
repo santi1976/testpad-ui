@@ -9,13 +9,10 @@ import {
   CheckCircle,
   Loader2,
 } from 'lucide-react'
-import { useAuth } from '@/contexts/AuthContext'
 import { apiGet } from '../utils/api'
+import { Sidebar } from '../components/layout/Sidebar'
 import { hasEmailSent } from '../utils/emailTracking'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Select,
@@ -25,34 +22,24 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb'
 import { cn } from '@/lib/utils'
 
+import {
+  getInitials,
+  formatDate,
+  createSlug,
+  getAvatarColor,
+  extractTesterFromRun,
+} from '@/utils/helpers'
+import {
+  Project,
+  Folder,
+  FolderItem,
+  Run as GlobalRun,
+  RunProgress as GlobalRunProgress,
+} from '@/types'
+
 // Types
-interface Project {
-  id: number | string
-  name: string
-}
-
-interface Folder {
-  id: number | string
-  name: string
-}
-
 interface Test {
   id: string | number
   name?: string
@@ -66,15 +53,15 @@ interface TestIssue {
   status: 'fail' | 'block'
 }
 
-interface RunProgress {
-  total?: number
-  pass?: number
-  fail?: number
-  block?: number
+interface RunProgress extends GlobalRunProgress {
+  total: number
+  pass: number
+  fail: number
+  block: number
   query?: number
 }
 
-interface Run {
+interface Run extends Omit<any, 'project' | 'folder' | 'script' | 'progress' | 'id'> {
   id: string | number
   label?: string
   created?: string
@@ -120,66 +107,28 @@ interface RunInfo {
   allRuns: Run[]
 }
 
-// Get initials from email for avatar
-function getInitials(email: string | undefined): string {
-  if (!email) return '?'
-  const parts = email.split('@')[0].split('.')
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return email.substring(0, 2).toUpperCase()
-}
-
-// Format date
-function formatDate(iso: string | undefined): string {
-  if (!iso) return 'N/A'
-  try {
-    return new Date(iso).toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    })
-  } catch {
-    return iso
-  }
-}
-
-// Get tests with issues from a run
-function getTestsWithIssues(run: Run, tests: Test[]): TestIssue[] {
-  const issues: TestIssue[] = []
-  if (!run?.results || !tests) return issues
+// Get a map of test ID to status for a run
+function getStatusMap(run: Run): Record<string, string> {
+  const statusMap: Record<string, string> = {}
+  if (!run?.results) return statusMap
 
   Object.entries(run.results).forEach(([testId, result]) => {
-    const status = typeof result === 'object' ? result?.result : result
-    if (
-      status === 'fail' ||
-      status === 'block' ||
-      status === 'failed' ||
-      status === 'blocked'
-    ) {
-      const test = tests.find((t) => String(t.id) === String(testId))
-      const testIndex = tests.findIndex((t) => String(t.id) === String(testId))
+    const rawStatus = typeof result === 'object' ? (result as any)?.result : result
+    const status = String(rawStatus).toLowerCase()
 
-      if (test) {
-        issues.push({
-          id: testId,
-          number: testIndex + 1,
-          text: test.text || test.name || 'Unknown test',
-          status: status === 'fail' || status === 'failed' ? 'fail' : 'block',
-        })
-      }
-    }
+    if (status.startsWith('pass')) statusMap[testId] = 'pass'
+    else if (status.startsWith('fail')) statusMap[testId] = 'fail'
+    else if (status.startsWith('block')) statusMap[testId] = 'block'
+    else if (status.startsWith('query')) statusMap[testId] = 'query'
   })
-
-  issues.sort((a, b) => a.number - b.number)
-  return issues
+  return statusMap
 }
 
 export default function TestSuiteDetails() {
   const { scriptName } = useParams<{ scriptName: string }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout } = useAuth()
+
 
   const [selectedRunIndex, setSelectedRunIndex] = useState(0)
 
@@ -205,23 +154,6 @@ export default function TestSuiteDetails() {
 
   const scriptId = getScriptId()
 
-  const navItems = [
-    { key: 'dashboard', label: 'Dashboard', path: '/', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
-    { key: 'divider1', label: 'Test Execution', type: 'divider' },
-    { key: 'create-run', label: 'Create Run', path: '/create-run', icon: 'M12 6v6m0 0v6m0-6h6m-6 0H6' },
-    { key: 'assignments', label: 'Assignments & Email', path: '/assignments', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
-    { key: 'divider-management', label: 'Test Management', type: 'divider' },
-    { key: 'test-suites', label: 'Test Suites', path: '/test-suites', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
-    { key: 'test-runs', label: 'Test Runs', path: '/test-runs', icon: 'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { key: 'divider2', type: 'separator' },
-    { key: 'reports', label: 'Reports', path: '#', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', disabled: true, badge: 'FUTURE' },
-    { key: 'settings', label: 'Settings', path: '/settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
-  ]
-
-  const handleSignOut = () => {
-    logout()
-    navigate('/login')
-  }
   const [testFilter, setTestFilter] = useState<'all' | 'failed' | 'blocked' | 'issues'>(
     'all'
   )
@@ -253,25 +185,9 @@ export default function TestSuiteDetails() {
   // If no scriptId available, show error
   if (!scriptId) {
     return (
-      <div className="flex h-screen bg-gray-50">
-        <aside className="w-64 text-white flex flex-col flex-shrink-0" style={{ backgroundColor: '#121827' }}>
-          <div className="p-4 border-b border-gray-700">
-            <h2 className="font-bold text-lg">Testpad Admin</h2>
-            <p className="text-xs text-gray-400 mt-1">{user?.email || 'user@bitfinex.com'}</p>
-          </div>
-          <nav className="flex-1 p-4">
-            <button
-              onClick={() => navigate('/test-suites')}
-              className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-gray-300 hover:bg-gray-800 w-full"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Go to Test Suites
-            </button>
-          </nav>
-        </aside>
-        <main className="flex-1 overflow-auto p-6">
+      <div className="flex h-screen bg-slate-100">
+        <Sidebar activeKey="test-suites" />
+        <main className="flex-1 overflow-auto p-8">
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
@@ -286,7 +202,20 @@ export default function TestSuiteDetails() {
     )
   }
 
-  const script: Script | undefined = scriptData?.script || scriptData
+  const script: any = (scriptData as any)?.script || scriptData
+
+  // DEBUG: log actual values
+  if (scriptData && script?.runs) {
+    script.runs.forEach((r: Run, i: number) => {
+      console.log(`[DEBUG] Run ${i}: id=${r.id}, label=${r.label}, state=${r.state}`)
+      console.log(`[DEBUG] Run ${i} progress:`, JSON.stringify(r.progress))
+      console.log(`[DEBUG] Run ${i} results keys:`, r.results ? Object.keys(r.results).length : 'NO RESULTS')
+      if (r.results) {
+        const sample = Object.entries(r.results).slice(0, 3)
+        console.log(`[DEBUG] Run ${i} results sample:`, JSON.stringify(sample))
+      }
+    })
+  }
 
   const selectedRun = script?.runs?.[selectedRunIndex] || script?.runs?.[0] || null
 
@@ -303,17 +232,30 @@ export default function TestSuiteDetails() {
     const sortedRuns = [...script.runs].sort((a, b) => {
       const aId = parseInt(String(a.id || a.headers?._run || 0))
       const bId = parseInt(String(b.id || b.headers?._run || 0))
-      return aId - bId
+      return bId - aId
     })
 
     const currentRun = sortedRuns[selectedRunIndex] || sortedRuns[0]
-    const runProgress = currentRun.progress || {}
+    const runProgress: any = currentRun.progress || {}
     const tests = script.tests || []
 
+    // Count from results if progress is missing or incomplete
+    let passedFromResults = 0
+    let failedFromResults = 0
+    let blockedFromResults = 0
+    if (currentRun.results) {
+      Object.values(currentRun.results).forEach((result) => {
+        const status = typeof result === 'object' ? (result as { result?: string })?.result : result
+        if (status === 'pass' || status === 'passed') passedFromResults++
+        else if (status === 'fail' || status === 'failed') failedFromResults++
+        else if (status === 'block' || status === 'blocked') blockedFromResults++
+      })
+    }
+
     const total = runProgress.total || tests.length
-    const passed = runProgress.pass || 0
-    const failed = runProgress.fail || 0
-    const blocked = runProgress.block || 0
+    const passed = runProgress.pass || passedFromResults
+    const failed = runProgress.fail || failedFromResults
+    const blocked = runProgress.block || blockedFromResults
     const query = runProgress.query || 0
     const notRun = total - passed - failed - blocked - query
 
@@ -331,7 +273,7 @@ export default function TestSuiteDetails() {
     }
 
     if (!userInfo?.email) {
-      const testerEmail = currentRun.headers?._tester || currentRun.assignee?.email
+      const testerEmail = extractTesterFromRun(currentRun)
       if (testerEmail && testerEmail.includes('@')) {
         userInfo = userInfo || {}
         userInfo.email = testerEmail
@@ -384,26 +326,20 @@ export default function TestSuiteDetails() {
     if (!script?.tests) return []
 
     const currentRun = runInfo?.run || selectedRun
-    const testsWithIssues = currentRun
-      ? getTestsWithIssues(currentRun, script.tests)
-      : []
-    const issueMap: Record<string, 'fail' | 'block'> = {}
-    testsWithIssues.forEach((issue) => {
-      issueMap[String(issue.id)] = issue.status
-    })
+    const statusMap = currentRun ? getStatusMap(currentRun) : {}
 
-    let filteredTests = script.tests.map((test, index) => ({
+    let filteredTests = script.tests.map((test: any, index: number) => ({
       ...test,
       _index: index + 1,
-      _issueStatus: issueMap[String(test.id)] || null,
+      _status: statusMap[String(test.id)] || 'none',
     }))
 
     if (testFilter === 'failed') {
-      filteredTests = filteredTests.filter((t) => t._issueStatus === 'fail')
+      filteredTests = filteredTests.filter((t: any) => t._status === 'fail')
     } else if (testFilter === 'blocked') {
-      filteredTests = filteredTests.filter((t) => t._issueStatus === 'block')
+      filteredTests = filteredTests.filter((t: any) => t._status === 'block')
     } else if (testFilter === 'issues') {
-      filteredTests = filteredTests.filter((t) => t._issueStatus)
+      filteredTests = filteredTests.filter((t: any) => t._status === 'fail' || t._status === 'block')
     }
 
     return filteredTests
@@ -412,560 +348,442 @@ export default function TestSuiteDetails() {
   const filteredTests = getFilteredTests()
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Navigation Sidebar */}
-      <aside className="w-64 text-white flex flex-col flex-shrink-0" style={{ backgroundColor: '#121827' }}>
-        <div className="p-4 border-b border-gray-700">
-          <h2 className="font-bold text-lg">Testpad Admin</h2>
-          <p className="text-xs text-gray-400 mt-1">{user?.email || 'user@bitfinex.com'}</p>
-        </div>
-        <nav className="flex-1 p-4 space-y-2">
-          {navItems.map((item) => {
-            if (item.type === 'divider') {
-              return (
-                <div key={item.key} className="pt-2">
-                  <p className="px-4 text-xs text-gray-500 uppercase tracking-wider mb-2">{item.label}</p>
-                </div>
-              )
-            }
-            if (item.type === 'separator') {
-              return <div key={item.key} className="border-t border-gray-700 my-4" />
-            }
-            const isActive = location.pathname === item.path
-            return (
-              <a
-                key={item.key}
-                href={item.disabled ? undefined : item.path}
-                onClick={(e) => {
-                  if (item.disabled) {
-                    e.preventDefault()
-                    return
-                  }
-                  e.preventDefault()
-                  navigate(item.path!)
-                }}
-                className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
-                  isActive
-                    ? 'bg-blue-600 text-white'
-                    : item.disabled
-                    ? 'text-gray-500 cursor-not-allowed'
-                    : 'text-gray-300 hover:bg-gray-800'
-                }`}
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-                </svg>
-                {item.label}
-                {item.badge && (
-                  <span className="ml-auto text-xs bg-yellow-600 text-white px-1.5 py-0.5 rounded">{item.badge}</span>
-                )}
-              </a>
-            )
-          })}
-        </nav>
-        <div className="p-4 border-t border-gray-700">
-          <button
-            onClick={handleSignOut}
-            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            Sign Out
-          </button>
-        </div>
-      </aside>
+    <div className="flex h-screen bg-slate-100">
+      <Sidebar activeKey="test-suites" />
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 overflow-auto p-8">
         <div className="max-w-[1400px] mx-auto w-full">
           {/* Breadcrumbs */}
-          <Breadcrumb className="mb-4">
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink
-                className="cursor-pointer text-blue-500 hover:text-blue-600"
-                onClick={() => navigate('/')}
-              >
-                <Home className="h-4 w-4 inline mr-1" />
-                {project?.name || 'Projects'}
-              </BreadcrumbLink>
-            </BreadcrumbItem>
+          <nav className="flex items-center gap-2 text-sm mb-5">
+            <a
+              className="text-orange-600 hover:text-orange-700 font-medium flex items-center gap-1 cursor-pointer"
+              onClick={() => navigate('/test-suites')}
+            >
+              <Home className="h-4 w-4" />
+              {project?.name || 'Projects'}
+            </a>
             {folder && (
               <>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <BreadcrumbLink
-                    className="cursor-pointer text-blue-500 hover:text-blue-600"
-                    onClick={handleBackToFolder}
-                  >
-                    {folder.name}
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
+                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path d="M9 5l7 7-7 7" /></svg>
+                <a
+                  className="text-orange-600 hover:text-orange-700 font-medium cursor-pointer"
+                  onClick={handleBackToFolder}
+                >
+                  {folder.name}
+                </a>
               </>
             )}
             {script && (
               <>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <span>{script.name || 'Test Suite'}</span>
-                </BreadcrumbItem>
+                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path d="M9 5l7 7-7 7" /></svg>
+                <span className="text-gray-700 font-semibold">{script.name || 'Test Suite'}</span>
               </>
             )}
-          </BreadcrumbList>
-        </Breadcrumb>
+          </nav>
 
-        {/* Header */}
-        <div className="mb-4">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h1 className="text-2xl font-bold">{script?.name || 'Test Suite Details'}</h1>
-              {script?.id && (
-                <p className="text-xs text-muted-foreground">ID: {script.id}</p>
-              )}
+          {/* Header */}
+          <div className="mb-5">
+            <div className="flex justify-between items-center mb-5">
+              <div>
+                <h1 className="text-2xl font-extrabold text-gray-900">{script?.name || 'Test Suite Details'}</h1>
+                {script?.id && (
+                  <p className="text-xs text-gray-400 mt-0.5 font-mono">ID: {script.id}</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {folder && (
+                  <button className="px-4 py-2 text-sm font-medium border-2 border-gray-300 rounded-lg bg-white hover:bg-gray-50 text-gray-700 transition-colors" onClick={handleBackToFolder}>
+                    Back to Release
+                  </button>
+                )}
+                <button className="px-4 py-2 text-sm font-medium border-2 border-gray-300 rounded-lg bg-white hover:bg-gray-50 text-gray-700 transition-colors" onClick={handleBackToProject}>
+                  Back to Project
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              {folder && (
-                <Button variant="outline" onClick={handleBackToFolder}>
-                  Back to Folder
-                </Button>
-              )}
-              <Button variant="outline" onClick={handleBackToProject}>
-                Back to Project
-              </Button>
-            </div>
-          </div>
 
-          {/* Run Progress Card */}
-          {runInfo && runInfo.stats && (
-            <Card className="bg-slate-50">
-              <CardContent className="p-4">
-                {/* Header with Test Suite, Folder and Run selector */}
-                <div className="mb-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <div className="flex-1">
-                      <p className="font-semibold text-lg mb-1">
-                        {script?.name || 'Test Suite'}
-                      </p>
-                      <div className="flex gap-3 items-center flex-wrap">
-                        {folder && (
-                          <Badge variant="secondary" className="bg-blue-100">
-                            {folder.name}
-                          </Badge>
-                        )}
-                        {project && (
-                          <span className="text-xs text-muted-foreground">
-                            {project.name}
-                          </span>
-                        )}
-                      </div>
+            {/* Run Progress Card */}
+            {runInfo && runInfo.stats && (
+              <div className="bg-white border-2 border-gray-200 rounded-xl shadow-md p-5 mb-5">
+                {/* Top: Suite info + Run selector */}
+                <div className="flex justify-between items-start mb-5">
+                  <div>
+                    <p className="font-bold text-lg text-gray-900">
+                      {script?.name || 'Test Suite'}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      {folder && (
+                        <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-300">
+                          {folder.name}
+                        </span>
+                      )}
+                      {project && (
+                        <span className="text-xs text-gray-400">
+                          {project.name}
+                        </span>
+                      )}
                     </div>
-                    {runInfo.allRuns && runInfo.allRuns.length > 1 && (
-                      <Select
-                        value={String(selectedRunIndex)}
-                        onValueChange={(v) => setSelectedRunIndex(parseInt(v))}
-                      >
-                        <SelectTrigger className="w-[220px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {runInfo.allRuns.map((run, index) => {
-                            const runLabel = run.label || `Run #${run.id || index + 1}`
-                            const parts = runLabel.split(' / ')
-                            const runNumber = parts[0] || `#${run.id || index + 1}`
-                            const email =
-                              parts[1] ||
-                              run.headers?._tester ||
-                              run.assignee?.email ||
-                              'Unknown'
-                            const emailPrefix = email.split('@')[0]
-                            return (
-                              <SelectItem key={index} value={String(index)}>
-                                Run #{runNumber} {emailPrefix && `(${emailPrefix})`}
-                              </SelectItem>
-                            )
-                          })}
-                        </SelectContent>
-                      </Select>
-                    )}
                   </div>
+                  {runInfo.allRuns && runInfo.allRuns.length > 1 && (
+                    <Select
+                      value={String(selectedRunIndex)}
+                      onValueChange={(v) => setSelectedRunIndex(parseInt(v))}
+                    >
+                      <SelectTrigger className="w-[240px] border-2 border-gray-300 font-medium focus:ring-2 focus:ring-orange-400 focus:border-orange-400">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {runInfo.allRuns.map((run, index) => {
+                          const runLabel = run.label || `Run #${run.id || index + 1}`
+                          const parts = runLabel.split(' / ')
+                          const runNumber = parts[0] || `#${run.id || index + 1}`
+                          const email =
+                            parts[1] ||
+                            run.headers?._tester ||
+                            run.assignee?.email ||
+                            'Unknown'
+                          const emailPrefix = email.split('@')[0]
+                          return (
+                            <SelectItem key={index} value={String(index)}>
+                              Run #{runNumber} {emailPrefix && `(${emailPrefix})`}
+                            </SelectItem>
+                          )
+                        })}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
 
-                {/* Progress and User Info */}
-                <div className="flex items-center gap-6 mb-5 flex-wrap">
-                  <div className="flex items-center justify-center">
-                    <div className="relative w-24 h-24 flex items-center justify-center rounded-full border-4 border-blue-500">
-                      <span className="text-2xl font-bold">{runInfo.stats.percentage}%</span>
-                    </div>
+                {/* Progress circle + Tester info */}
+                <div className="flex items-center gap-6 mb-5">
+                  <div className="relative w-24 h-24 flex items-center justify-center rounded-full border-4 border-orange-400 bg-orange-50/50 flex-shrink-0">
+                    <span className="text-2xl font-extrabold text-orange-700 font-mono">{runInfo.stats.percentage}%</span>
                   </div>
-                  <div className="flex-1 min-w-[200px]">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Avatar className="h-7 w-7">
-                        <AvatarFallback className="bg-blue-500 text-white text-xs">
-                          {getInitials(runInfo.userInfo?.email || '?')}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2.5 mb-2">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className={cn("text-white text-[11px] font-bold border border-green-300", getAvatarColor(runInfo.userInfo?.email))}>
+                          {getInitials(runInfo.userInfo?.email)}
                         </AvatarFallback>
                       </Avatar>
                       <div>
-                        <p className="font-semibold text-sm">
-                          {runInfo.userInfo?.email?.split('@')[0] ||
-                            runInfo.userInfo?.email ||
-                            'Unknown'}
+                        <p className="font-bold text-sm text-gray-900">
+                          {runInfo.userInfo?.email?.split('@')[0]?.split('.').map(
+                            (w: string) => w.charAt(0).toUpperCase() + w.slice(1)
+                          ).join(' ') || 'Unknown'}
                         </p>
                         {runInfo.userInfo?.runNumber && (
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-gray-500 font-mono">
                             Run #{runInfo.userInfo.runNumber}
                           </p>
                         )}
                       </div>
                     </div>
-                    <div className="flex gap-3 flex-wrap items-center">
+                    <div className="flex items-center gap-3">
                       {runInfo.userInfo?.date && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-gray-400">
                           {runInfo.userInfo.date}
                         </span>
                       )}
                       {(() => {
                         const emailWasSent = hasEmailSent(
-                          Number(scriptId),
-                          Number(runInfo.id)
+                          String(scriptId),
+                          String(runInfo.id)
                         )
-                        const isNew = runInfo.state === 'new'
+                        const testerEmail = runInfo.run?.headers?._tester || runInfo.run?.assignee?.email
+                        const hasTester = testerEmail && testerEmail.includes('@')
 
-                        if (isNew && emailWasSent) {
+                        if (emailWasSent || hasTester) {
                           return (
-                            <div className="flex flex-col gap-1">
-                              <Badge variant="default" className="bg-green-500 text-xs">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                Email Sent
-                              </Badge>
-                              <Badge variant="outline" className="text-[9px]">
-                                Status: NEW
-                              </Badge>
-                            </div>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300">
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12" /></svg>
+                              Email Sent
+                            </span>
                           )
                         }
-
-                        return runInfo.state ? (
-                          <Badge
-                            variant={
-                              runInfo.state === 'completed'
-                                ? 'default'
-                                : runInfo.state === 'started'
-                                  ? 'outline'
-                                  : 'secondary'
-                            }
-                            className="text-xs"
-                          >
-                            {runInfo.state}
-                          </Badge>
-                        ) : null
+                        return null
                       })()}
+                      {runInfo.state && (
+                        <span className={cn(
+                          'inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border',
+                          runInfo.state === 'completed' ? 'bg-green-100 text-green-700 border-green-200' :
+                            runInfo.state === 'started' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                              'bg-gray-100 text-gray-600 border-gray-200'
+                        )}>
+                          {runInfo.state}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* Statistics Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 mb-4">
-                  <div className="p-3 bg-gray-100 rounded text-center">
-                    <p className="text-xs text-muted-foreground mb-1">Total</p>
-                    <p className="text-xl font-bold">{runInfo.stats.total}</p>
+                {/* Stats Grid */}
+                <div className="grid grid-cols-5 gap-3 mb-4">
+                  <div className="p-3 bg-gray-100 rounded-lg text-center border border-gray-200">
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Total</p>
+                    <p className="text-xl font-extrabold text-gray-800 font-mono">{runInfo.stats.total}</p>
                   </div>
-                  <div className="p-3 bg-green-50 border border-green-200 rounded text-center">
-                    <p className="text-xs text-muted-foreground mb-1">Passed</p>
-                    <p className="text-xl font-bold text-green-500">
-                      {runInfo.stats.passed}
-                    </p>
+                  <div className="p-3 bg-green-50 rounded-lg text-center border-2 border-green-300">
+                    <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wide mb-1">Passed</p>
+                    <p className="text-xl font-extrabold text-green-600 font-mono">{runInfo.stats.passed}</p>
                   </div>
-                  {runInfo.stats.failed > 0 && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded text-center">
-                      <p className="text-xs text-muted-foreground mb-1">Failed</p>
-                      <p className="text-xl font-bold text-red-500">
-                        {runInfo.stats.failed}
-                      </p>
-                    </div>
-                  )}
-                  {runInfo.stats.blocked > 0 && (
-                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-center">
-                      <p className="text-xs text-muted-foreground mb-1">Blocked</p>
-                      <p className="text-xl font-bold text-yellow-500">
-                        {runInfo.stats.blocked}
-                      </p>
-                    </div>
-                  )}
-                  {runInfo.stats.notRun > 0 && (
-                    <div className="p-3 bg-gray-50 border border-gray-200 rounded text-center">
-                      <p className="text-xs text-muted-foreground mb-1">Not Run</p>
-                      <p className="text-xl font-bold text-gray-500">
-                        {runInfo.stats.notRun}
-                      </p>
-                    </div>
-                  )}
+                  <div className="p-3 bg-red-50 rounded-lg text-center border-2 border-red-300">
+                    <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wide mb-1">Failed</p>
+                    <p className="text-xl font-extrabold text-red-600 font-mono">{runInfo.stats.failed}</p>
+                  </div>
+                  <div className="p-3 bg-yellow-50 rounded-lg text-center border-2 border-yellow-300">
+                    <p className="text-[10px] font-semibold text-yellow-600 uppercase tracking-wide mb-1">Blocked</p>
+                    <p className="text-xl font-extrabold text-yellow-600 font-mono">{runInfo.stats.blocked}</p>
+                  </div>
+                  <div className="p-3 bg-gray-50 rounded-lg text-center border border-gray-200">
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Not Run</p>
+                    <p className="text-xl font-extrabold text-gray-500 font-mono">{runInfo.stats.notRun}</p>
+                  </div>
                 </div>
 
-                {/* Summary Line */}
-                <div className="p-3 bg-white rounded border text-xs font-mono">
-                  Pass: <span className="font-bold text-green-500">{runInfo.stats.passed}</span>{' '}
-                  Fail: <span className="font-bold text-red-500">{runInfo.stats.failed}</span>{' '}
+                {/* Summary mono line */}
+                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs font-mono font-medium">
+                  Pass: <span className="font-bold text-green-600">{runInfo.stats.passed}</span>{' '}
+                  Fail: <span className="font-bold text-red-600">{runInfo.stats.failed}</span>{' '}
                   Block:{' '}
-                  <span className="font-bold text-yellow-500">{runInfo.stats.blocked}</span>{' '}
-                  Query: <span className="font-bold">0</span> Total:{' '}
-                  <span className="font-bold">
+                  <span className="font-bold text-yellow-600">{runInfo.stats.blocked}</span>{' '}
+                  Query: <span className="font-bold text-gray-500">0</span> Total:{' '}
+                  <span className="font-bold text-gray-800">
                     {runInfo.stats.passed}/{runInfo.stats.total}
                   </span>
                 </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {scriptLoading ? (
-          <div className="text-center py-10">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-500" />
-            <p className="mt-4 text-muted-foreground">Loading test suite details...</p>
+              </div>
+            )}
           </div>
-        ) : scriptError ? (
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              Error loading test suite details: {(scriptError as Error).message}
-            </AlertDescription>
-          </Alert>
-        ) : script ? (
-          <div>
-            {/* Basic Info */}
-            <Card className="mb-4 bg-slate-50">
-              <CardContent className="py-3">
-                <div className="flex gap-6 flex-wrap items-center text-xs">
-                  {script.description && (
-                    <div>
-                      <span className="text-muted-foreground">Description: </span>
-                      <span>{script.description}</span>
-                    </div>
-                  )}
-                  {script.created && (
-                    <div>
-                      <span className="text-muted-foreground">Created: </span>
-                      <span>{formatDate(script.created)}</span>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
 
-            {/* Alert Banner for Issues */}
-            {runInfo && (runInfo.stats.failed > 0 || runInfo.stats.blocked > 0) && (
-              <Alert
-                variant={runInfo.stats.failed > 0 ? 'destructive' : 'default'}
-                className={cn(
-                  'mb-4',
-                  runInfo.stats.failed === 0 && 'border-yellow-500 bg-yellow-50'
+          {scriptLoading ? (
+            <div className="text-center py-10">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto text-orange-500" />
+              <p className="mt-4 text-gray-500">Loading test suite details...</p>
+            </div>
+          ) : scriptError ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Error loading test suite details: {(scriptError as Error).message}
+              </AlertDescription>
+            </Alert>
+          ) : script ? (
+            <div>
+              {/* Basic Info */}
+              <div className="bg-white border-2 border-gray-200 rounded-xl shadow-sm px-5 py-3 mb-5 flex items-center gap-6 text-xs">
+                {script.description && (
+                  <div>
+                    <span className="text-gray-400 font-medium">Description: </span>
+                    <span className="text-gray-700">{script.description}</span>
+                  </div>
                 )}
-              >
-                {runInfo.stats.failed > 0 ? (
-                  <XCircle className="h-4 w-4" />
-                ) : (
-                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                {script.description && script.created && <div className="w-px h-5 bg-gray-200" />}
+                {script.created && (
+                  <div>
+                    <span className="text-gray-400 font-medium">Created: </span>
+                    <span className="text-gray-700 font-medium">{formatDate(script.created)}</span>
+                  </div>
                 )}
-                <AlertDescription>
-                  <div className="flex justify-between items-center flex-wrap gap-3">
+              </div>
+
+              {/* Alert Banner for Issues */}
+              {runInfo && (runInfo.stats.failed > 0 || runInfo.stats.blocked > 0) && (
+                <div className="bg-red-50 border-2 border-red-300 rounded-xl px-5 py-3.5 mb-5 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <XCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                     <div>
-                      <span className="font-semibold">
+                      <span className="text-sm font-bold text-red-800">
                         {(runInfo.stats.failed || 0) + (runInfo.stats.blocked || 0)} test
-                        {(runInfo.stats.failed || 0) + (runInfo.stats.blocked || 0) > 1
-                          ? 's'
-                          : ''}{' '}
+                        {(runInfo.stats.failed || 0) + (runInfo.stats.blocked || 0) > 1 ? 's' : ''}{' '}
                         need attention in this run
                       </span>
-                      <span className="ml-2">
+                      <span className="text-sm text-red-600 ml-2">
                         {runInfo.stats.failed > 0 && `${runInfo.stats.failed} failed`}
                         {runInfo.stats.failed > 0 && runInfo.stats.blocked > 0 && ', '}
                         {runInfo.stats.blocked > 0 && `${runInfo.stats.blocked} blocked`}
                       </span>
                     </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {runInfo.stats.failed > 0 && (
+                      <button
+                        className="px-3 py-1.5 text-xs font-bold bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors shadow-sm"
+                        onClick={() => {
+                          setTestFilter('failed')
+                          document.getElementById('test-cases-table')?.scrollIntoView({ behavior: 'smooth' })
+                        }}
+                      >
+                        Jump to Failed
+                      </button>
+                    )}
+                    {runInfo.stats.blocked > 0 && (
+                      <button
+                        className="px-3 py-1.5 text-xs font-bold bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors shadow-sm"
+                        onClick={() => {
+                          setTestFilter('blocked')
+                          document.getElementById('test-cases-table')?.scrollIntoView({ behavior: 'smooth' })
+                        }}
+                      >
+                        Jump to Blocked
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Test Cases Table */}
+              <div id="test-cases-table" className="bg-white border-2 border-gray-200 rounded-xl shadow-md overflow-hidden">
+                {/* Table Header */}
+                <div className="px-5 py-4 border-b-2 border-gray-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <h3 className="text-base font-bold text-gray-900">Test Cases</h3>
+                    {script.tests && (
+                      <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-gray-200 text-gray-700 border border-gray-300 font-mono">
+                        {script.tests.length}
+                      </span>
+                    )}
+                  </div>
+                  {runInfo && (runInfo.stats.failed > 0 || runInfo.stats.blocked > 0) && (
                     <div className="flex gap-2">
+                      <button
+                        className={cn(
+                          'px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-colors',
+                          testFilter === 'all'
+                            ? 'bg-orange-500 text-white'
+                            : 'border-2 border-gray-300 text-gray-600 hover:bg-gray-50'
+                        )}
+                        onClick={() => setTestFilter('all')}
+                      >
+                        All ({script.tests?.length || 0})
+                      </button>
                       {runInfo.stats.failed > 0 && (
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => {
-                            setTestFilter('failed')
-                            document
-                              .getElementById('test-cases-table')
-                              ?.scrollIntoView({ behavior: 'smooth' })
-                          }}
+                        <button
+                          className={cn(
+                            'px-3 py-1.5 text-xs font-bold rounded-lg transition-colors',
+                            testFilter === 'failed'
+                              ? 'bg-red-500 text-white shadow-sm'
+                              : 'border-2 border-red-300 text-red-600 hover:bg-red-50'
+                          )}
+                          onClick={() => setTestFilter('failed')}
                         >
-                          Jump to Failed
-                        </Button>
+                          Failed ({runInfo.stats.failed})
+                        </button>
                       )}
                       {runInfo.stats.blocked > 0 && (
-                        <Button
-                          size="sm"
-                          className="bg-yellow-500 hover:bg-yellow-600"
-                          onClick={() => {
-                            setTestFilter('blocked')
-                            document
-                              .getElementById('test-cases-table')
-                              ?.scrollIntoView({ behavior: 'smooth' })
-                          }}
+                        <button
+                          className={cn(
+                            'px-3 py-1.5 text-xs font-bold rounded-lg transition-colors',
+                            testFilter === 'blocked'
+                              ? 'bg-yellow-500 text-white shadow-sm'
+                              : 'border-2 border-yellow-300 text-yellow-700 hover:bg-yellow-50'
+                          )}
+                          onClick={() => setTestFilter('blocked')}
                         >
-                          Jump to Blocked
-                        </Button>
+                          Blocked ({runInfo.stats.blocked})
+                        </button>
                       )}
+                      <button
+                        className={cn(
+                          'px-3 py-1.5 text-xs font-bold rounded-lg transition-colors',
+                          testFilter === 'issues'
+                            ? 'bg-gray-700 text-white shadow-sm'
+                            : 'border-2 border-gray-300 text-gray-600 hover:bg-gray-50'
+                        )}
+                        onClick={() => setTestFilter('issues')}
+                      >
+                        All Issues ({(runInfo.stats.failed || 0) + (runInfo.stats.blocked || 0)})
+                      </button>
                     </div>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {/* Test Cases Table */}
-            <Card id="test-cases-table">
-              <CardHeader className="pb-3">
-                <div className="flex justify-between items-center flex-wrap gap-3">
-                  <CardTitle className="flex items-center gap-2">
-                    Test Cases
-                    {script.tests && (
-                      <Badge variant="secondary">{script.tests.length}</Badge>
-                    )}
-                  </CardTitle>
-                  {runInfo &&
-                    (runInfo.stats.failed > 0 || runInfo.stats.blocked > 0) && (
-                      <div className="flex gap-2 flex-wrap">
-                        <Button
-                          size="sm"
-                          variant={testFilter === 'all' ? 'default' : 'outline'}
-                          onClick={() => setTestFilter('all')}
-                        >
-                          All ({script.tests?.length || 0})
-                        </Button>
-                        {runInfo.stats.failed > 0 && (
-                          <Button
-                            size="sm"
-                            variant={testFilter === 'failed' ? 'destructive' : 'outline'}
-                            onClick={() => setTestFilter('failed')}
-                          >
-                            Failed ({runInfo.stats.failed})
-                          </Button>
-                        )}
-                        {runInfo.stats.blocked > 0 && (
-                          <Button
-                            size="sm"
-                            variant={testFilter === 'blocked' ? 'default' : 'outline'}
-                            className={
-                              testFilter === 'blocked'
-                                ? 'bg-yellow-500 hover:bg-yellow-600'
-                                : ''
-                            }
-                            onClick={() => setTestFilter('blocked')}
-                          >
-                            Blocked ({runInfo.stats.blocked})
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant={testFilter === 'issues' ? 'default' : 'outline'}
-                          onClick={() => setTestFilter('issues')}
-                        >
-                          All Issues (
-                          {(runInfo.stats.failed || 0) + (runInfo.stats.blocked || 0)})
-                        </Button>
-                      </div>
-                    )}
+                  )}
                 </div>
-              </CardHeader>
-              <CardContent>
+
+                {/* Column Header */}
+                <div className="px-5 py-2.5 bg-gray-50 border-b-2 border-gray-200 flex items-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                  <div className="w-[70px] text-center">#</div>
+                  <div className="flex-1">Test Case</div>
+                  <div className="w-[100px] text-center">Status</div>
+                </div>
+
+                {/* Test Rows */}
                 {script.tests && script.tests.length > 0 ? (
-                  <div className="rounded border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[70px] text-center">#</TableHead>
-                          <TableHead>Test Case</TableHead>
-                          <TableHead className="w-[100px] text-center">Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredTests.map((test) => {
-                          const currentRun = runInfo?.run || selectedRun
-                          let statusBadge = <Badge variant="outline">-</Badge>
+                  <div>
+                    {filteredTests.map((test: any) => {
+                      const testStatus = test._status
 
-                          if (test._issueStatus === 'fail') {
-                            statusBadge = (
-                              <Badge variant="destructive">
-                                <XCircle className="h-3 w-3 mr-1" /> FAIL
-                              </Badge>
-                            )
-                          } else if (test._issueStatus === 'block') {
-                            statusBadge = (
-                              <Badge className="bg-yellow-500">
-                                <AlertTriangle className="h-3 w-3 mr-1" /> BLOCK
-                              </Badge>
-                            )
-                          } else if (currentRun?.results) {
-                            const result = currentRun.results[String(test.id)]
-                            const status =
-                              typeof result === 'object' ? result?.result : result
-                            if (status === 'pass' || status === 'passed') {
-                              statusBadge = (
-                                <Badge className="bg-green-500">
-                                  <CheckCircle className="h-3 w-3 mr-1" /> PASS
-                                </Badge>
-                              )
-                            }
-                          }
-
-                          return (
-                            <TableRow
-                              key={test.id}
-                              className={cn(
-                                test._issueStatus === 'fail' && 'bg-red-50 hover:bg-red-100',
-                                test._issueStatus === 'block' &&
-                                  'bg-yellow-50 hover:bg-yellow-100'
-                              )}
-                            >
-                              <TableCell className="text-center font-mono">
-                                <span
-                                  className={cn(
-                                    test._issueStatus === 'fail' && 'text-red-500 font-bold',
-                                    test._issueStatus === 'block' &&
-                                      'text-yellow-600 font-bold'
-                                  )}
-                                >
-                                  {String(test._index).padStart(4, '0')}
-                                </span>
-                              </TableCell>
-                              <TableCell>
-                                <span
-                                  className={cn(
-                                    'text-sm',
-                                    test._issueStatus && 'font-semibold'
-                                  )}
-                                >
-                                  {test.text || test.name || 'Test Case without name'}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-center">{statusBadge}</TableCell>
-                            </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
+                      return (
+                        <div
+                          key={test.id}
+                          className={cn(
+                            'px-5 py-3 min-h-[44px] flex items-center border-b border-gray-100 transition-colors',
+                            testStatus === 'fail' && 'bg-red-50 hover:bg-red-100/70',
+                            testStatus === 'block' && 'bg-yellow-50 hover:bg-yellow-100/70',
+                            testStatus === 'pass' && 'hover:bg-green-50/30',
+                            testStatus === 'none' && 'hover:bg-gray-50'
+                          )}
+                        >
+                          <div className="w-[70px] text-center font-mono text-xs">
+                            <span className={cn(
+                              'font-medium text-gray-500',
+                              testStatus === 'fail' && 'font-bold text-red-600',
+                              testStatus === 'block' && 'font-bold text-yellow-700'
+                            )}>
+                              {String(test._index).padStart(4, '0')}
+                            </span>
+                          </div>
+                          <div className="flex-1">
+                            <span className={cn(
+                              'text-sm text-gray-800',
+                              (testStatus === 'fail' || testStatus === 'block') && 'font-semibold text-gray-900'
+                            )}>
+                              {test.text || test.name || 'Test Case without name'}
+                            </span>
+                          </div>
+                          <div className="w-[100px] flex justify-center">
+                            {testStatus === 'pass' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300">
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12" /></svg>
+                                PASS
+                              </span>
+                            )}
+                            {testStatus === 'fail' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-400">
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+                                FAIL
+                              </span>
+                            )}
+                            {testStatus === 'block' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-400">
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                                BLOCK
+                              </span>
+                            )}
+                            {testStatus === 'none' && (
+                              <span className="inline-flex items-center text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                                -
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                     {filteredTests.length === 0 && (
-                      <p className="text-center py-8 text-muted-foreground">
+                      <p className="text-center py-8 text-gray-500">
                         No tests match the selected filter.
                       </p>
                     )}
                   </div>
                 ) : (
-                  <p className="text-muted-foreground">
+                  <p className="text-center py-8 text-gray-500">
                     No test cases found in this test suite.
                   </p>
                 )}
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <p className="text-muted-foreground">No test suite data available.</p>
-        )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">No test suite data available.</p>
+          )}
         </div>
       </main>
     </div>

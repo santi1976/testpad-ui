@@ -76,7 +76,7 @@ async function loginToTestpad(userEmail, userPassword) {
 
   // Step 2: Submit login with user's credentials
   const formData = `csrfmiddlewaretoken=${encodeURIComponent(csrfToken)}&email=${encodeURIComponent(userEmail)}&password=${encodeURIComponent(userPassword)}&js=y&next=`
-  
+
   const loginResponse = await httpsRequest({
     hostname: 'app.testpad.com',
     port: 443,
@@ -104,17 +104,17 @@ async function loginToTestpad(userEmail, userPassword) {
   // Step 3: Follow redirects
   let location = loginResponse.headers.location
   let redirectCount = 0
-  
+
   while (location && redirectCount < 5) {
     let host = 'bitfinex.testpad.com'
     let path = location
-    
+
     if (location.startsWith('http')) {
       const url = new URL(location)
       host = url.hostname
       path = url.pathname + url.search
     }
-    
+
     const redirect = await httpsRequest({
       hostname: host,
       port: 443,
@@ -126,11 +126,11 @@ async function loginToTestpad(userEmail, userPassword) {
       },
       rejectUnauthorized: false
     })
-    
+
     if (redirect.cookies) {
       cookies = [cookies, redirect.cookies].filter(c => c).join('; ')
     }
-    
+
     if (redirect.status === 200) break
     location = redirect.headers.location
     redirectCount++
@@ -156,9 +156,9 @@ async function ensureLoggedIn(userEmail, userPassword) {
   }
   // Re-login if session is older than 10 minutes or doesn't exist
   const SESSION_TTL = 10 * 60 * 1000
-  const session = userSessions.get(userEmail)
+  const session = userSessions.get(userEmail.toLowerCase())
   if (!session || !session.cookies || !session.lastLogin || (Date.now() - session.lastLogin) > SESSION_TTL) {
-    return await loginToTestpad(userEmail, userPassword)
+    return await loginToTestpad(userEmail.toLowerCase(), userPassword)
   }
   return session
 }
@@ -171,7 +171,7 @@ async function startServer() {
   app.post('/api/validate-login', async (req, res) => {
     try {
       const { email, apiToken } = req.body
-      
+
       if (!email || !apiToken) {
         return res.status(400).json({ error: 'Email and API token are required' })
       }
@@ -179,7 +179,7 @@ async function startServer() {
       // Validate domain
       const allowedDomains = ['bitfinex.com', 'tether.com']
       const emailDomain = email.split('@')[1]?.toLowerCase()
-      
+
       if (!allowedDomains.includes(emailDomain)) {
         return res.status(400).json({ error: 'Email must be from @bitfinex.com or @tether.com' })
       }
@@ -226,7 +226,8 @@ async function startServer() {
         return res.status(401).json({ error: 'User credentials required. Please log in with email and password.' })
       }
 
-      const { cookies, csrfToken } = await ensureLoggedIn(senderEmail, senderPassword)
+      console.log(`[API] Assign & Send requested by ${senderEmail} for ${targetEmail} (Script: ${scriptName})`)
+      const { cookies, csrfToken } = await ensureLoggedIn(senderEmail.toLowerCase(), senderPassword)
 
       // Generate ObjectId
       const timestamp = Math.floor(Date.now() / 1000).toString(16).padStart(8, '0')
@@ -361,7 +362,7 @@ async function startServer() {
       }
 
       const proxyResponse = await httpsRequest(options, body)
-      
+
       res.status(proxyResponse.status)
       try {
         res.json(JSON.parse(proxyResponse.data))
@@ -377,7 +378,7 @@ async function startServer() {
   if (isProduction) {
     // Serve static files from dist directory
     app.use(express.static(join(__dirname, 'dist')))
-    
+
     // Handle SPA routing - serve index.html for all non-API routes
     app.get('*', (req, res) => {
       if (!req.path.startsWith('/api')) {

@@ -1,4 +1,3 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { useQuery } from '@tanstack/react-query'
@@ -38,6 +37,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogContent as UIDialogContent,
 } from '@/components/ui/dialog'
 import {
   Tooltip,
@@ -48,107 +48,27 @@ import {
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import { Sidebar } from '../components/layout/Sidebar'
+import { Project, Folder, FolderItem, Run, RunProgress, TesterGroup } from '@/types'
+import {
+  getInitials,
+  displayNameFromEmail,
+  getAvatarColor,
+  AVATAR_COLORS
+} from '@/utils/helpers'
 
-// Types
-interface Project {
-  id: number | string
-  name: string
-}
-
-interface Folder {
-  id: number | string
-  name: string
-  type?: string
-  contents?: FolderItem[]
-}
-
-interface FolderItem {
-  id: number | string
-  name: string
-  type: 'folder' | 'script'
-  contents?: FolderItem[]
-}
-
-interface RunProgress {
-  pass?: number
-  fail?: number
-  block?: number
-  total?: number
-}
-
-interface Run {
-  id: string
-  runId: number | string
-  runNumber: number | string
-  state: string
-  tester: string | null
-  scriptId: number | string
-  scriptName: string
-  projectId: number | string
-  projectName: string
-  folderId: number | string | null
-  folderName: string | null
-  created?: string
-  progress?: RunProgress
-  testerEmail?: string | null
-}
-
-interface AssignmentsAndEmailProps {
-  embedded?: boolean
-}
-
-interface TesterGroup {
-  email: string
-  displayName: string
-  initials: string
-  runs: Run[]
-  releaseGroups: { name: string; folderId: string | number | null; isLatest: boolean; runs: Run[] }[]
-  totalRuns: number
-}
-
-// Helpers
-function getInitials(email: string | undefined): string {
-  if (!email) return '?'
-  const parts = email.split('@')[0].split('.')
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return email.substring(0, 2).toUpperCase()
-}
-
-function displayNameFromEmail(email: string): string {
-  return email.split('@')[0].split('.').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-}
-
+// Local Helpers
 function getRunState(run: Record<string, unknown>): string {
   if (run.state) return run.state as string
   const progress = run.progress as RunProgress | undefined
   if (progress) {
     const { pass = 0, fail = 0, block = 0, total = 0 } = progress
-    const completed = pass + fail + block
+    const completed = (pass || 0) + (fail || 0) + (block || 0)
     if (total > 0 && completed === total) return 'completed'
     if (completed > 0) return 'started'
   }
   return 'new'
 }
-
-function getEffectiveTester(run: Run, assignments: Record<string, string>): string | null {
-  if (run.id in assignments) {
-    return assignments[run.id] || null
-  }
-  return null
-}
-
-const AVATAR_COLORS = [
-  { bg: 'bg-green-100', text: 'text-green-700' },
-  { bg: 'bg-blue-100', text: 'text-blue-700' },
-  { bg: 'bg-purple-100', text: 'text-purple-700' },
-  { bg: 'bg-amber-100', text: 'text-amber-800' },
-  { bg: 'bg-pink-100', text: 'text-pink-700' },
-  { bg: 'bg-sky-100', text: 'text-sky-700' },
-  { bg: 'bg-red-100', text: 'text-red-700' },
-  { bg: 'bg-emerald-100', text: 'text-emerald-700' },
-]
 
 const WORKLOAD_COLORS = ['#22c55e', '#3b82f6', '#7c3aed', '#f59e0b', '#ec4899', '#0ea5e9', '#ef4444', '#059669']
 
@@ -167,27 +87,22 @@ function saveExcludedTesters(excluded: Set<string>) {
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────
+import { useState, useMemo, useCallback, useEffect } from 'react'
+
+interface AssignmentsAndEmailProps {
+  embedded?: boolean
+}
+
 export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAndEmailProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
 
-  const navItems = [
-    { key: 'dashboard', label: 'Dashboard', path: '/', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
-    { key: 'divider1', label: 'Test Execution', type: 'divider' },
-    { key: 'create-run', label: 'Create Run', path: '/create-run', icon: 'M12 6v6m0 0v6m0-6h6m-6 0H6' },
-    { key: 'assignments', label: 'Assignments & Email', path: '/assignments', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
-    { key: 'divider-management', label: 'Test Management', type: 'divider' },
-    { key: 'test-suites', label: 'Test Suites', path: '/test-suites', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
-    { key: 'test-runs', label: 'Test Runs', path: '/test-runs', icon: 'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { key: 'divider2', type: 'separator' },
-    { key: 'reports', label: 'Reports', path: '#', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', disabled: true, badge: 'FUTURE' },
-    { key: 'settings', label: 'Settings', path: '/settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
-  ]
-
-  const handleSignOut = () => {
-    logout()
-    navigate('/login')
+  function getEffectiveTester(run: Run, assignments: Record<string, string>): string | null {
+    if (run.id in assignments) {
+      return assignments[run.id] || null
+    }
+    return null
   }
 
   // ─── State ──────────────────────────────────────────────────────────────
@@ -212,7 +127,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
     queryFn: () => apiGet('/api/v1/projects'),
   })
 
-  const projects: Project[] = projectsData?.projects || []
+  const projects: Project[] = (projectsData as any)?.projects || []
 
   useEffect(() => {
     if (selectedProject === null && projects.length > 0) {
@@ -247,11 +162,11 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
     queryKey: ['projectFolders', activeProject?.id],
     queryFn: async () => {
       if (!activeProject) return { folders: [], releases: [] }
-      const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`)
+      const response = await apiGet(`/api/v1/projects/${activeProject.id}/folders`) as { folders: FolderItem[] }
       const folders = response?.folders || []
       const releases = folders
         .filter((item: FolderItem) => item.type === 'folder')
-        .map((folder: FolderItem) => ({ id: folder.id, name: folder.name, contents: folder.contents }))
+        .map((folder: FolderItem) => ({ id: folder.id, name: folder.name, contents: folder.contents } as Folder))
         .sort((a: Folder, b: Folder) => String(b.name).localeCompare(String(a.name)))
       return { folders, releases }
     },
@@ -316,10 +231,10 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
 
       results.forEach((result) => {
         if (result.status === 'fulfilled' && result.value) {
-          const { script, folder, scriptData } = result.value
+          const { script, folder, scriptData } = result.value as { script: FolderItem; folder: Folder; scriptData: any }
           const scriptDetails = scriptData?.script || scriptData
           if (scriptDetails.runs && Array.isArray(scriptDetails.runs)) {
-            scriptDetails.runs.forEach((run: Record<string, unknown>) => {
+            scriptDetails.runs.forEach((run: any) => {
               const state = getRunState(run)
               let testerEmail: string | null = null
               const headers = run.headers as Record<string, string> | undefined
@@ -617,7 +532,14 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
       attempt: number = 1
     ): Promise<{ success: boolean; error?: string }> => {
       try {
-        await assignAndSendEmail(run.scriptId, run.runId, testerEmail, run.scriptName)
+        await assignAndSendEmail(
+          run.scriptId,
+          run.runId!,
+          testerEmail,
+          run.scriptName,
+          user?.email,
+          user?.password
+        )
         return { success: true }
       } catch (error) {
         const errMsg = (error as Error).message
@@ -707,69 +629,19 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
   const totalUnassigned = unassignedRuns.length
   const totalSent = sentRuns.length
 
-  // ─── Sidebar renderer ─────────────────────────────────────────────────
-  const renderSidebar = () => (
-    <aside className="w-64 text-white flex flex-col flex-shrink-0" style={{ backgroundColor: '#121827' }}>
-      <div className="p-4 border-b border-gray-700">
-        <h2 className="font-bold text-lg">Testpad Admin</h2>
-        <p className="text-xs text-gray-400 mt-1">{user?.email || 'user@bitfinex.com'}</p>
-      </div>
-      <nav className="flex-1 p-4 space-y-2">
-        {navItems.map((item) => {
-          if (item.type === 'divider') {
-            return (
-              <div key={item.key} className="pt-2">
-                <p className="px-4 text-xs text-gray-500 uppercase tracking-wider mb-2">{item.label}</p>
-              </div>
-            )
-          }
-          if (item.type === 'separator') return <div key={item.key} className="border-t border-gray-700 my-4" />
-          const isActive = location.pathname === item.path
-          return (
-            <a
-              key={item.key}
-              href={item.disabled ? undefined : item.path}
-              onClick={(e) => {
-                if (item.disabled) { e.preventDefault(); return }
-                e.preventDefault()
-                navigate(item.path!)
-              }}
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
-                isActive ? 'bg-blue-600 text-white' : item.disabled ? 'text-gray-500 cursor-not-allowed' : 'text-gray-300 hover:bg-gray-800'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-              </svg>
-              {item.label}
-              {item.badge && <span className="ml-auto text-xs bg-yellow-600 text-white px-1.5 py-0.5 rounded">{item.badge}</span>}
-            </a>
-          )
-        })}
-      </nav>
-      <div className="p-4 border-t border-gray-700">
-        <button onClick={handleSignOut} className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-          </svg>
-          Sign Out
-        </button>
-      </div>
-    </aside>
-  )
 
   // ─── Loading State ─────────────────────────────────────────────────────
   if (isLoading && allRuns.length === 0) {
     const loadingContent = (
       <div className="p-6 text-center">
-        <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-500" />
+        <Loader2 className="h-8 w-8 animate-spin mx-auto text-orange-500" />
         <p className="mt-4 text-muted-foreground">Loading runs...</p>
       </div>
     )
     if (embedded) return loadingContent
     return (
-      <div className="flex h-screen bg-gray-50">
-        {renderSidebar()}
+      <div className="flex h-screen bg-slate-100">
+        <Sidebar activeKey="assignments" />
         <main className="flex-1 overflow-auto p-6">{loadingContent}</main>
       </div>
     )
@@ -997,7 +869,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
               {unassignedRuns.length === 0 ? (
                 <p className="text-center py-10 text-sm text-gray-400">No unassigned runs</p>
               ) : (
-                unassignedRuns.map((run) => (
+                unassignedRuns.map((run: Run) => (
                   <div
                     key={run.id}
                     className={cn(
@@ -1028,7 +900,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
             <div className="px-4 py-3 border-t-2 border-gray-200 bg-gray-50 flex items-center gap-3 flex-shrink-0">
               <label className="text-xs text-gray-600 cursor-pointer flex items-center gap-1.5 flex-shrink-0 font-medium">
                 <Checkbox
-                  checked={unassignedRuns.length > 0 && unassignedRuns.every((r) => selectedRunIds.has(r.id))}
+                  checked={unassignedRuns.length > 0 && unassignedRuns.every((r: Run) => selectedRunIds.has(r.id))}
                   onCheckedChange={toggleSelectAllUnassigned}
                   className="h-4 w-4"
                 />
@@ -1071,7 +943,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
               {assignedByTester.length === 0 ? (
                 <p className="text-center py-10 text-sm text-gray-400">No assigned runs yet</p>
               ) : (
-                assignedByTester.map((group) => (
+                assignedByTester.map((group: TesterGroup) => (
                   <div key={group.email}>
                     <div className="flex items-center justify-between py-2.5 border-b-2 border-gray-200 mt-2 first:mt-0">
                       <span className="text-sm font-bold text-gray-800">
@@ -1093,12 +965,9 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                     {group.releaseGroups.map((rg) => (
                       <div key={rg.name}>
                         <div
-                          className={cn(
-                            'text-[10px] font-bold font-mono mt-2 ml-1 px-2 py-1 rounded inline-block border',
-                            rg.isLatest ? 'text-green-700 bg-green-50 border-green-300' : 'text-orange-700 bg-orange-50 border-orange-300'
-                          )}
+                          className="text-[10px] font-bold font-mono mt-2 ml-1 px-2 py-1 rounded inline-block border text-orange-700 bg-orange-50 border-orange-300"
                         >
-                          {rg.name}
+                          {rg.name}{rg.isLatest && ' -latest-'}
                         </div>
                         {rg.runs.map((run) => (
                           <div
@@ -1110,10 +979,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                           >
                             <Badge
                               variant="outline"
-                              className={cn(
-                                'text-[10px] px-2 py-0.5 flex-shrink-0 font-bold font-mono',
-                                isLatestRelease(run) ? 'bg-green-50 text-green-700 border-green-300' : 'bg-orange-50 text-orange-700 border-orange-300'
-                              )}
+                              className="text-[10px] px-2 py-0.5 flex-shrink-0 font-bold font-mono bg-green-50 text-green-700 border-green-300"
                             >
                               {run.folderName}
                             </Badge>
@@ -1144,8 +1010,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
               Assigned by Tester ({allAssignedByTester.length} active) — Ready to Send
             </h3>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3 mb-6">
-              {allAssignedByTester.map((group, gi) => {
-                const avatarColor = AVATAR_COLORS[gi % AVATAR_COLORS.length]
+              {allAssignedByTester.map((group) => {
                 const workloadPct = Math.round((group.totalRuns / maxRunsPerTester) * 100)
                 return (
                   <div key={group.email} className="bg-white border-2 border-gray-200 rounded-xl overflow-hidden flex flex-col shadow-lg" style={{ height: '300px' }}>
@@ -1155,8 +1020,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                         <div
                           className={cn(
                             'w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold',
-                            avatarColor.bg,
-                            avatarColor.text
+                            getAvatarColor(group.email)
                           )}
                         >
                           {group.initials}
@@ -1196,7 +1060,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                               variant="outline"
                               className={cn(
                                 'text-[9px] px-1.5 py-0 flex-shrink-0 font-bold font-mono',
-                                isLatestRelease(run) ? 'bg-green-50 text-green-700 border-green-300' : 'bg-orange-50 text-orange-700 border-orange-300'
+                                'bg-green-50 text-green-700 border-green-300'
                               )}
                             >
                               {run.folderName}
@@ -1226,7 +1090,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                             className="h-full rounded-full"
                             style={{
                               width: `${workloadPct}%`,
-                              backgroundColor: WORKLOAD_COLORS[gi % WORKLOAD_COLORS.length],
+                              backgroundColor: WORKLOAD_COLORS[allTesters.indexOf(group.email) % WORKLOAD_COLORS.length],
                             }}
                           />
                         </div>
@@ -1324,8 +1188,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                       <div
                         className={cn(
                           'w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold',
-                          AVATAR_COLORS[0].bg,
-                          AVATAR_COLORS[0].text
+                          getAvatarColor(group.email)
                         )}
                       >
                         {group.initials}
@@ -1336,7 +1199,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                     <span className="font-semibold text-sm">{group.totalRuns} run{group.totalRuns > 1 ? 's' : ''}</span>
                   </div>
                   <div className="px-3 py-2 bg-white">
-                    {group.releaseGroups.map((rg) => (
+                    {group.releaseGroups.map((rg: any) => (
                       <div key={rg.name}>
                         <Badge
                           variant="outline"
@@ -1347,7 +1210,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
                         >
                           {rg.name}
                         </Badge>
-                        {rg.runs.map((run, idx) => (
+                        {rg.runs.map((run: Run, idx: number) => (
                           <div
                             key={run.id}
                             className={cn('flex items-center gap-3 py-2', idx < rg.runs.length - 1 && 'border-b')}
@@ -1402,7 +1265,7 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
   // ─── Full Page Layout ──────────────────────────────────────────────────
   return (
     <div className="flex h-screen bg-gray-50">
-      {renderSidebar()}
+      <Sidebar activeKey="assignments" />
       <main className="flex-1 overflow-auto p-6">{content}</main>
     </div>
   )

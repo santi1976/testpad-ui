@@ -24,7 +24,7 @@ export interface Project {
 export interface FolderItem {
   id: number | string
   name: string
-  type: 'folder' | 'script'
+  type?: 'folder' | 'script'
   contents?: FolderItem[]
   created?: string
   progress?: Progress
@@ -41,17 +41,46 @@ export interface Progress {
   summary?: string
 }
 
+export interface RunProgress {
+  pass?: number
+  fail?: number
+  block?: number
+  total?: number
+  query?: number
+}
+
+export interface Folder extends FolderItem {
+  type?: 'folder' | 'script'
+}
+
 export interface Run {
   id: string
+  runId?: number | string
+  runNumber?: number | string
+  state?: 'new' | 'started' | 'complete' | string
+  tester: string | null
+  scriptId: number | string
+  scriptName: string
+  projectId: number | string
+  projectName: string
+  folderId?: number | string | null
+  folderName?: string | null
   created?: string
-  state?: 'new' | 'started' | 'complete'
-  label?: string
+  progress?: RunProgress
+  testerEmail?: string | null
   headers?: Record<string, string>
   assignee?: {
     id: string | number
     name: string
     email: string
   }
-  results?: Record<string, { result?: string; comment?: string }>
-  progress?: Progress
+}
+
+export interface TesterGroup {
+  email: string
+  displayName: string
+  initials: string
+  runs: Run[]
+  releaseGroups: { name: string; folderId: string | number | null; isLatest: boolean; runs: Run[] }[]
+  totalRuns: number
 }

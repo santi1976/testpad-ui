@@ -28,19 +28,13 @@ export default async function handler(req, res) {
   // Vercel normalizes headers to lowercase, but check both cases
   const authHeader = req.headers.authorization || req.headers.Authorization || req.headers['authorization']
   let token = null
-  
+
   if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('apikey ')) {
     // Extract token from "apikey TOKEN" format
     token = authHeader.substring(7).trim()
     console.log('[PROXY] Using user token from Authorization header')
   } else {
-    // Fallback to server token
-    token = process.env.VITE_TESTPAD_API_TOKEN
-    if (authHeader) {
-      console.log('[PROXY] Authorization header found but invalid format:', authHeader.substring(0, 20) + '...')
-    } else {
-      console.log('[PROXY] No Authorization header found, using server token')
-    }
+    console.log('[PROXY] No valid Authorization header found')
   }
 
   if (!token) {
@@ -82,18 +76,18 @@ export default async function handler(req, res) {
     }
 
     const proxyResponse = await httpsRequest(options, body)
-    
+
     console.log('[PROXY] Response status:', proxyResponse.status)
     console.log('[PROXY] Response data length:', proxyResponse.data?.length || 0)
     if (proxyResponse.status >= 400) {
       console.log('[PROXY] Error response:', proxyResponse.data?.substring(0, 200))
     }
-    
+
     // Set CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-    
+
     res.status(proxyResponse.status)
     try {
       return res.json(JSON.parse(proxyResponse.data))

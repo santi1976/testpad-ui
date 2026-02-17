@@ -1,208 +1,117 @@
-# Testpad Admin
+# Testpad Admin UI
 
-Internal tool for managing test runs, assignments, and team coordination with Testpad API.
+A premium, internal dashboard for managing Bitfinex test execution. This tool enhances the Testpad experience by providing advanced analytics, batch operations, and unified test management.
 
-```
-React 18 + TypeScript + Tailwind CSS + Vite
+```text
+React 18 + TypeScript + Tailwind CSS + Vite + Radix UI
 ```
 
 ---
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 18, TypeScript, Tailwind CSS |
-| State | TanStack Query (React Query) |
-| UI Components | shadcn/ui, Radix UI |
-| Charts | Recharts |
-| Routing | React Router v6 |
-| Build | Vite |
-| Backend | Node.js + Express (proxy) |
-
----
-
-## Quick Start
+## 🚀 Quick Start
 
 ```bash
-# Install
+# Install dependencies
 npm install
 
-# Dev server
+# Start development server
 npm run dev
 
-# Build
+# Production build
 npm run build
 ```
 
-Open `http://localhost:5173`
+The application will be available at `http://localhost:5173`.
 
 ---
 
-## Environment
+## 🛠️ Tech Stack & Architecture
 
-Create `.env` in root:
+| Layer | Technology |
+|-------|------------|
+| **Frontend** | React 18, TypeScript, Tailwind CSS |
+| **UI Components** | [shadcn/ui](https://ui.shadcn.com/), Lucide Icons |
+| **Logic & State** | TanStack Query (React Query) |
+| **Routing** | React Router v6 |
+| **Analytics** | Recharts (Pie charts, Progress bars) |
+| **Proxy Server** | Node.js + Express (for Testpad API and web endpoints) |
 
+---
+
+## 📖 Features & Navigation
+
+### 📊 Dashboard
+The central hub for QA metrics. Includes:
+- **Global Stats**: Instant view of Passed, Failed, and Blocked tests.
+- **Visual Charts**: Interactive pie charts showing execution distribution.
+- **Team Kanban**: Track tester workload and individual progress in real-time.
+
+### 📁 Test Suites & Details
+Organized by release (e.g., Release 1.135):
+- **Browse Suites**: Expandable releases showing suite status (Sent, Pending, No Runs).
+- **Deep Execution View**: See full test results (PASS/FAIL/BLOCK) for specific runs.
+- **Run History**: Toggle between different runs of the same suite to see evolution.
+
+### 🏃 Create Run
+Streamlined batch run creation:
+- **Project Selection**: Easily pick projects and filter folders.
+- **Batch Creation**: Select multiple scripts and create runs with a single click.
+
+### ✉️ Assignments & Email
+Manage team distribution:
+- **Tester Assignment**: Assign runs to specific testers.
+- **Batch Notifications**: Send invitation emails to the entire team.
+- **Tracking**: Client-side tracking of sent emails to avoid duplicates.
+
+---
+
+## ⚙️ Technical Configuration
+
+### Authentication
+The app uses a dual-auth system:
+1. **Tester Login**: Users enter their own Testpad API Token and Password.
+2. **System Account**: Used for sending batch emails. Configured via `.env`.
+
+### Environment Variables (`.env`)
 ```env
-# API Token (fallback for development)
-VITE_TESTPAD_API_TOKEN=your_api_token
-
-# System user for assignments/emails
+# System user for assignments/emails (must be a manager/admin in Testpad)
 USER_TESTPAD=system@bitfinex.com
-PASSWORD_TESTPAD=password_here
+PASSWORD_TESTPAD=your_secure_password
 COMPANY_OID=your_company_oid
 ```
 
-> Users log in with their own API token. System credentials are only for sending assignment emails.
+### Key Implementation Details
+- **Email Tracking**: Since the Testpad API doesn't track if an invitation was sent, we use `localStorage` to mark sent emails, providing visual feedback in the UI.
+- **Global Sidebar**: A unified navigation component (`Sidebar.tsx`) handles all routing and project context.
+- **Shared Helpers**: Centralized logic in `src/utils/helpers.ts` for consistent data formatting (dates, initials, colors).
 
 ---
 
-## Features
+## 📦 Project Structure
 
-| Feature | Description |
-|---------|-------------|
-| Dashboard | Stats, pie charts, progress bars, team kanban |
-| Create Run | Select scripts, create runs in batch |
-| Assignments | Batch assign testers, send invitation emails |
-| Test Suites | Browse projects, folders, scripts by release |
-| Settings | API connection, Slack integration config |
-
----
-
-## Pages
-
-| Route | Component | Description |
-|-------|-----------|-------------|
-| `/` | Dashboard | Analytics and team status |
-| `/create-run` | CreateAndAssign | Create new test runs |
-| `/assignments` | AssignmentsAndEmail | Assign testers, send emails |
-| `/test-suites` | App | Browse test suites by project |
-| `/test-suite/:name` | TestSuiteDetails | View test cases and run details |
-| `/settings` | Settings | Configuration |
-| `/login` | Login | Authentication |
-
----
-
-## Project Structure
-
-```
+```text
 src/
-├── api/                  # API calls
-│   ├── assignAndSendEmail.ts
-│   ├── createRuns.ts
-│   ├── getCredentials.ts
-│   ├── getUsers.ts
-│   └── login.ts
-├── components/
-│   ├── charts/           # Recharts components
-│   │   └── results-pie-chart.tsx
+├── api/                  # Specialized API services (Batch, Auth, Users)
+├── components/           # UI and Layout components
+│   ├── layout/           # Sidebar.tsx, Shell
 │   ├── ui/               # shadcn/ui components
-│   │   ├── button.tsx
-│   │   ├── card.tsx
-│   │   ├── progress-bar.tsx
-│   │   ├── stat-card.tsx
-│   │   ├── tester-kanban-board.tsx
-│   │   └── ...
-│   ├── Navbar.tsx
-│   └── UserMenu.tsx
-├── contexts/
-│   └── AuthContext.tsx   # Auth state management
-├── hooks/                # Custom hooks
-├── pages/
-│   ├── Dashboard.tsx
-│   ├── CreateAndAssign.tsx
-│   ├── AssignmentsAndEmail.tsx
-│   ├── TestSuiteDetails.tsx
-│   ├── Settings.tsx
-│   └── Login.tsx
-├── types/
-│   └── index.ts          # TypeScript types
-├── utils/
-│   ├── api.ts            # API client
-│   └── emailTracking.ts  # Local email tracking
-├── App.tsx               # Test Suites page
-├── main.tsx              # Router setup
-└── index.css             # Tailwind + CSS variables
+│   └── charts/           # Recharts implementations
+├── contexts/             # AuthContext.tsx for session state
+├── pages/                # Main feature pages (Dashboard, TestSuites, etc.)
+├── types/                # Unified TypeScript interfaces
+├── utils/                # api.ts client and shared helpers
+└── App.tsx               # Primary Router configuration
 ```
 
 ---
 
-## API Limitations
-
-Testpad API does not expose:
-
-| Not Available | Workaround |
-|---------------|------------|
-| Email sent status | Track locally with `localStorage` |
-| Assignment history | N/A |
-| Assignment source | N/A |
-
-**Run States:**
-
-| State | Can Assign | Can Send Email |
-|-------|------------|----------------|
-| `new` | Yes | Yes |
-| `started` | No | No |
-| `completed` | No | No |
-
----
-
-## Authentication
-
-| Method | Purpose |
-|--------|---------|
-| User API Token | REST API calls (stored in localStorage) |
-| System Credentials | Assignment emails (stored in .env) |
-
----
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `server.js` | Express proxy for Testpad web endpoints |
-| `src/utils/api.ts` | API client with auth |
-| `src/utils/emailTracking.ts` | LocalStorage email tracking |
-| `src/api/assignAndSendEmail.ts` | Assignment + email API |
-
----
-
-## UI Design
-
-| Element | Style |
-|---------|-------|
-| Sidebar | Dark (#121827) |
-| Primary | Blue (hsl 217 91% 60%) |
-| Selected Dropdown | Cyan highlight |
-| Cards | White + subtle borders |
-
----
-
-## Scripts
-
-```bash
-npm run dev      # Start dev server
-npm run build    # Production build
-npm run preview  # Preview production build
-npm run lint     # ESLint
-```
-
----
-
-## Notes
-
-- Testers list comes from executed test runs only
-- Email tracking is client-side (localStorage)
-- Test suite URLs use slug names, ID in sessionStorage
-- System email account required for sending notifications
-
----
-
-## Docs
-
-- [CHECKPOINT.md](./CHECKPOINT.md) - Project state
-- [TESTPAD-API-OFFICIAL.md](./TESTPAD-API-OFFICIAL.md) - API reference
+## 📝 Usage Notes
+- **API Limits**: The tool respects Testpad's API structure. Note that some values (like "Email Sent") are tracked only on the client where the action was performed.
+- **Browser Compatibility**: Optimized for modern versions of Chrome and Safari.
+- **Credentials**: Ensure your Testpad API Token has sufficient permissions (Manager role is recommended for all features).
 
 ---
 
 **Bitfinex QA Team**
+Saurabh Verna | saurabh.verna@bitfinex.com
+Santiago Riveira | santiago.riveira@bitfinex.com

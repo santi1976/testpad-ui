@@ -26,12 +26,12 @@ export function httpsRequest(options, body = null) {
   })
 }
 
-export async function loginToTestpad() {
-  const USERNAME = process.env.USER_TESTPAD
-  const PASSWORD = process.env.PASSWORD_TESTPAD?.trim()
+export async function loginToTestpad(userEmail, userPassword) {
+  const USERNAME = userEmail || process.env.USER_TESTPAD
+  const PASSWORD = userPassword?.trim() || process.env.PASSWORD_TESTPAD?.trim()
 
   if (!USERNAME || !PASSWORD) {
-    throw new Error('USER_TESTPAD and PASSWORD_TESTPAD must be set in environment variables')
+    throw new Error('User credentials required for Testpad login')
   }
 
   // Step 1: Get login page
@@ -48,7 +48,7 @@ export async function loginToTestpad() {
   })
 
   let cookies = loginPage.cookies
-  
+
   // Extract CSRF token
   const csrfMatch = loginPage.data.match(/name=['"]csrfmiddlewaretoken['"][^>]*value=['"]([^'"]+)/i)
   if (!csrfMatch) {
@@ -58,7 +58,7 @@ export async function loginToTestpad() {
 
   // Step 2: Submit login
   const formData = `csrfmiddlewaretoken=${encodeURIComponent(csrfToken)}&email=${encodeURIComponent(USERNAME)}&password=${encodeURIComponent(PASSWORD)}&js=y&next=`
-  
+
   const loginResponse = await httpsRequest({
     hostname: 'app.testpad.com',
     port: 443,
@@ -86,17 +86,17 @@ export async function loginToTestpad() {
   // Step 3: Follow redirects
   let location = loginResponse.headers.location
   let redirectCount = 0
-  
+
   while (location && redirectCount < 5) {
     let host = 'bitfinex.testpad.com'
     let path = location
-    
+
     if (location.startsWith('http')) {
       const url = new URL(location)
       host = url.hostname
       path = url.pathname + url.search
     }
-    
+
     const redirect = await httpsRequest({
       hostname: host,
       port: 443,
@@ -108,11 +108,11 @@ export async function loginToTestpad() {
       },
       rejectUnauthorized: false
     })
-    
+
     if (redirect.cookies) {
       cookies = [cookies, redirect.cookies].filter(c => c).join('; ')
     }
-    
+
     if (redirect.status === 200) break
     location = redirect.headers.location
     redirectCount++

@@ -6,7 +6,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { TestersProvider } from './contexts/TestersContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
-import App from './App'
+import TestSuites from './pages/TestSuites'
 import TestSuiteDetails from './pages/TestSuiteDetails'
 import TestRuns from './pages/TestRuns'
 import CreateAndAssign from './pages/CreateAndAssign'
@@ -34,69 +34,69 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <TestersProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/test-runs"
-              element={
-                <ProtectedRoute>
-                  <TestRuns />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/test-suites"
-              element={
-                <ProtectedRoute>
-                  <App />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/test-suite/:scriptName"
-              element={
-                <ProtectedRoute>
-                  <TestSuiteDetails />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/create-run"
-              element={
-                <ProtectedRoute>
-                  <CreateAndAssign />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/assignments"
-              element={
-                <ProtectedRoute>
-                  <AssignmentsAndEmail />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/settings"
-              element={
-                <ProtectedRoute>
-                  <Settings />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-          <Toaster />
-        </BrowserRouter>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/test-runs"
+                element={
+                  <ProtectedRoute>
+                    <TestRuns />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/test-suites"
+                element={
+                  <ProtectedRoute>
+                    <TestSuites />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/test-suite/:scriptName"
+                element={
+                  <ProtectedRoute>
+                    <TestSuiteDetails />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/create-run"
+                element={
+                  <ProtectedRoute>
+                    <CreateAndAssign />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/assignments"
+                element={
+                  <ProtectedRoute>
+                    <AssignmentsAndEmail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <ProtectedRoute>
+                    <Settings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            <Toaster />
+          </BrowserRouter>
         </TestersProvider>
       </AuthProvider>
     </QueryClientProvider>
