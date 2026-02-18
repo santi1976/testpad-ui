@@ -27,8 +27,8 @@ export function httpsRequest(options, body = null) {
 }
 
 export async function loginToTestpad(userEmail, userPassword) {
-  const USERNAME = userEmail || process.env.USER_TESTPAD
-  const PASSWORD = userPassword?.trim() || process.env.PASSWORD_TESTPAD?.trim()
+  const USERNAME = userEmail
+  const PASSWORD = userPassword?.trim()
 
   if (!USERNAME || !PASSWORD) {
     throw new Error('User credentials required for Testpad login')

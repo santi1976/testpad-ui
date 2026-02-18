@@ -30,7 +30,7 @@ export default async function handler(req, res) {
     // Login to Testpad using provided sender credentials (fallback to env if missing)
     const { cookies, csrfToken } = await loginToTestpad(senderEmail, senderPassword)
 
-    const SENDER_EMAIL = senderEmail || process.env.USER_TESTPAD
+    const SENDER_EMAIL = senderEmail
 
     // Generate ObjectId
     const timestamp = Math.floor(Date.now() / 1000).toString(16).padStart(8, '0')

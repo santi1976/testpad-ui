@@ -168,7 +168,7 @@ async function startServer() {
   app.use(express.json())
 
   // API endpoint: Validate user login (Email + API Token)
-  app.post('/api/validate-login', async (req, res) => {
+  app.post('/api/login', async (req, res) => {
     try {
       const { email, apiToken } = req.body
 
@@ -199,8 +199,18 @@ async function startServer() {
         })
 
         if (testResponse.status === 200) {
-          // Token is valid
-          res.json({ valid: true, email })
+          // Token is valid. Now validate password if provided.
+          if (req.body.password) {
+            try {
+              await loginToTestpad(email, req.body.password)
+              // Both Token and Password are valid
+              res.json({ valid: true, email })
+            } catch (loginError) {
+              res.status(401).json({ valid: false, error: 'Invalid credentials' })
+            }
+          } else {
+            res.status(400).json({ valid: false, error: 'Password is required' })
+          }
         } else {
           res.status(401).json({ valid: false, error: 'Invalid API token' })
         }
@@ -226,7 +236,6 @@ async function startServer() {
         return res.status(401).json({ error: 'User credentials required. Please log in with email and password.' })
       }
 
-      console.log(`[API] Assign & Send requested by ${senderEmail} for ${targetEmail} (Script: ${scriptName})`)
       const { cookies, csrfToken } = await ensureLoggedIn(senderEmail.toLowerCase(), senderPassword)
 
       // Generate ObjectId

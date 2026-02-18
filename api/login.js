@@ -1,5 +1,5 @@
 // Vercel serverless function: Validate user login (Email + API Token)
-import { httpsRequest } from './_utils.js'
+import { httpsRequest, loginToTestpad } from './_utils.js'
 
 export default async function handler(req, res) {
   // Handle CORS preflight
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     // Parse body if it's a string
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
     const { email, apiToken } = body
-    
+
     if (!email || !apiToken) {
       return res.status(400).json({ error: 'Email and API token are required' })
     }
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     // Validate domain
     const allowedDomains = ['bitfinex.com', 'tether.com']
     const emailDomain = email.split('@')[1]?.toLowerCase()
-    
+
     if (!allowedDomains.includes(emailDomain)) {
       return res.status(400).json({ error: 'Email must be from @bitfinex.com or @tether.com' })
     }
@@ -44,8 +44,19 @@ export default async function handler(req, res) {
       })
 
       if (testResponse.status === 200) {
-        // Token is valid
-        return res.json({ valid: true, email })
+        // Token is valid. Now validate password if provided.
+        if (body.password) {
+          try {
+            await loginToTestpad(email, body.password)
+            // Both Token and Password are valid
+            return res.json({ valid: true, email })
+          } catch (loginError) {
+            return res.status(401).json({ valid: false, error: 'Invalid credentials' })
+          }
+        } else {
+          // Should not happen if frontend enforces password, but for safety:
+          return res.status(400).json({ valid: false, error: 'Password is required' })
+        }
       } else {
         return res.status(401).json({ valid: false, error: 'Invalid API token' })
       }

@@ -35,12 +35,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     // Validate API token against backend (which validates against Testpad API)
-    const response = await fetch('/api/validate-login', {
+    const response = await fetch('/api/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ email, apiToken })
+      body: JSON.stringify({ email, password, apiToken })
     })
 
     const data = await response.json()

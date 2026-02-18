@@ -40,7 +40,13 @@ export async function assignAndSendEmail(
     const data = await response.json()
 
     if (!response.ok) {
-      throw new Error(data.error || `Request failed with status ${response.status}`)
+      const errorMsg = data.error || `Request failed with status ${response.status}`
+      // Check for nested details from Testpad response
+      let details = ''
+      if (data.details) {
+        details = typeof data.details === 'string' ? data.details : JSON.stringify(data.details)
+      }
+      throw new Error(details ? `${errorMsg}: ${details}` : errorMsg)
     }
 
     console.log('[assignAndSendEmail] ✅ Success:', data.message)

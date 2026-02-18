@@ -21,7 +21,7 @@ This project is configured to deploy to Vercel using serverless functions.
    - `COMPANY_OID` - Company ID in Testpad
    - `VITE_TESTPAD_API_TOKEN` - Testpad API token (fallback)
 6. Click on "Deploy"
-7. Done! Your app will be available at `your-project.vercel.app`
+7. Your app will be available at `your-project.vercel.app`
 
 ### Option 2: Deploy with Vercel CLI
 
