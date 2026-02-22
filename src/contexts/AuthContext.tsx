@@ -16,25 +16,69 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const storedUser = localStorage.getItem('testpad_user')
     if (storedUser) {
       try {
-        setUser(JSON.parse(storedUser))
+        const parsed = JSON.parse(storedUser)
+        
+        // Validate that all required fields exist
+        if (!parsed.email || !parsed.password || !parsed.apiToken) {
+          console.warn('[AuthContext] ⚠️ Stored user missing required fields:', {
+            email: parsed.email ? '✅' : '❌ MISSING',
+            password: parsed.password ? '✅' : '❌ MISSING',
+            apiToken: parsed.apiToken ? '✅' : '❌ MISSING'
+          })
+          console.warn('[AuthContext] Clearing invalid session. User must re-login.')
+          localStorage.removeItem('testpad_user')
+          localStorage.removeItem('testpad_testers_global')
+        } else {
+          console.log('[AuthContext] ✅ User loaded from localStorage:', parsed.email)
+          console.log('[AuthContext] Credentials check:', {
+            email: '✅',
+            password: `✅ (${parsed.password.length} chars)`,
+            apiToken: `✅ (${parsed.apiToken.length} chars)`
+          })
+          setUser(parsed)
+        }
       } catch (e) {
+        console.error('[AuthContext] ❌ Failed to parse stored user:', e)
         localStorage.removeItem('testpad_user')
       }
+    } else {
+      console.log('[AuthContext] No stored user found')
     }
     setIsLoading(false)
   }, [])
 
-  // Login function - validates Email + API Token against Testpad API
+  // Login function - validates Email + Password + API Token against Testpad API
   const login = async (email: string, password: string, apiToken: string): Promise<User> => {
+    console.log('[AuthContext] ========== Login attempt ==========')
+    console.log('[AuthContext] Credentials received:', {
+      email: email || '❌ MISSING',
+      password: password ? `✅ (${password.length} chars)` : '❌ MISSING',
+      apiToken: apiToken ? `✅ (${apiToken.length} chars)` : '❌ MISSING'
+    })
+
     // Validate email domain
     const allowedDomains = ['bitfinex.com', 'tether.com']
     const emailDomain = email.split('@')[1]?.toLowerCase()
 
     if (!allowedDomains.includes(emailDomain)) {
+      console.log('[AuthContext] ❌ Invalid email domain:', emailDomain)
       throw new Error('Email must be from @bitfinex.com or @tether.com')
     }
 
-    // Validate API token against backend (which validates against Testpad API)
+    // Validate all fields before calling API
+    if (!email || !password || !apiToken) {
+      const missing = []
+      if (!email) missing.push('email')
+      if (!password) missing.push('password')
+      if (!apiToken) missing.push('apiToken')
+      const errorMsg = `Missing required fields: ${missing.join(', ')}`
+      console.log('[AuthContext] ❌', errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    console.log('[AuthContext] Calling /api/login to validate credentials...')
+
+    // Validate credentials against backend
     const response = await fetch('/api/login', {
       method: 'POST',
       headers: {
@@ -44,12 +88,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     })
 
     const data = await response.json()
+    console.log('[AuthContext] API response:', { status: response.status, valid: data.valid, error: data.error })
 
     if (!response.ok || !data.valid) {
-      throw new Error(data.error || 'Invalid API token')
+      console.log('[AuthContext] ❌ Login failed:', data.error)
+      throw new Error(data.error || 'Invalid credentials')
     }
 
-    // Save user and token in localStorage
+    // Save user with ALL credentials in localStorage
     const userData: User = {
       email,
       password,
@@ -58,6 +104,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       loginTime: new Date().toISOString()
     }
 
+    console.log('[AuthContext] ✅ Login successful, saving user to localStorage')
     localStorage.setItem('testpad_user', JSON.stringify(userData))
     setUser(userData)
 

@@ -510,6 +510,21 @@ export default function AssignmentsAndEmail({ embedded = false }: AssignmentsAnd
 
   // ─── Email Sending ─────────────────────────────────────────────────────
   const handleSendEmails = async (forTester?: string) => {
+    // CRITICAL: Validate user has all required credentials before attempting to send
+    if (!user?.email || !user?.password) {
+      console.error('[handleSendEmails] ❌ Missing user credentials:', {
+        email: user?.email ? '✅' : '❌ MISSING',
+        password: user?.password ? '✅' : '❌ MISSING'
+      })
+      toast.error('Session expired or invalid. Please logout and login again with your Testpad password.')
+      return
+    }
+    
+    console.log('[handleSendEmails] ✅ User credentials verified:', {
+      email: user.email,
+      passwordLength: user.password.length
+    })
+
     const runsToSend = allAssignedRuns.filter((run) => {
       const tester = getEffectiveTester(run, runAssignments)
       if (!tester) return false
