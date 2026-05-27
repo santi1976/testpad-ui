@@ -16,6 +16,7 @@ import {
   X,
   Loader2,
   AlertCircle,
+  FileText,
 } from 'lucide-react'
 import { apiGet } from '../utils/api'
 import { Sidebar } from '../components/layout/Sidebar'
@@ -40,6 +41,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 
 import { getInitials, formatDate, createSlug } from '@/utils/helpers'
 import { Project, Folder, FolderItem, Run as GlobalRun, RunProgress as GlobalRunProgress } from '@/types'
+import { RunReportModal } from '@/components/ui/run-report-modal'
 
 
 interface UserInfo {
@@ -68,7 +70,7 @@ interface TestIssue {
   id: string
   number: number
   text: string
-  status: 'fail' | 'block'
+  status: 'fail'
 }
 
 interface Run extends Omit<any, 'project' | 'folder' | 'script' | 'progress' | 'id'> {
@@ -128,14 +130,14 @@ function formatElapsedTime(created: string | undefined): string {
 }
 
 
-// Get tests with issues (failed or blocked) from a run
+// Get tests with issues (failed only - blocks are not bugs)
 function getTestsWithIssues(run: Run): TestIssue[] {
   const issues: TestIssue[] = []
   if (!run.results || !run.tests) return issues
 
   Object.entries(run.results).forEach(([testId, result]) => {
     const status = typeof result === 'object' ? result?.result : result
-    if (status === 'fail' || status === 'block' || status === 'failed' || status === 'blocked') {
+    if (status === 'fail' || status === 'failed') {
       const test = run.tests.find((t) => String(t.id) === String(testId))
       const testIndex = run.tests.findIndex((t) => String(t.id) === String(testId))
 
@@ -144,7 +146,7 @@ function getTestsWithIssues(run: Run): TestIssue[] {
           id: testId,
           number: testIndex + 1,
           text: test.text || test.name || 'Unknown test',
-          status: status === 'fail' || status === 'failed' ? 'fail' : 'block',
+          status: 'fail',
         })
       }
     }
@@ -193,6 +195,7 @@ export default function TestRuns() {
   const [progressiveRuns, setProgressiveRuns] = useState<Run[]>([])
   const [isLoadingProgressive, setIsLoadingProgressive] = useState(false)
   const [error, setError] = useState<Error | null>(null)
+  const [showReportModal, setShowReportModal] = useState(false)
 
 
   // Cache key for localStorage
@@ -1295,8 +1298,8 @@ export default function TestRuns() {
                         run.state = runState
 
                         const isSelected = selectedRun?.script?.id === scriptGroup.script.id
-                        const hasIssues = failed > 0 || blocked > 0
-                        const totalIssues = failed + blocked
+                        const hasIssues = failed > 0
+                        const totalIssues = failed
                         const issuesExpanded = expandedIssues[scriptId] || false
                         const testsWithIssues = hasIssues ? getTestsWithIssues(run) : []
 
@@ -1508,7 +1511,6 @@ export default function TestRuns() {
                                       size="sm"
                                       className={cn(
                                         'w-full text-xs',
-                                        failed > 0 &&
                                         !issuesExpanded &&
                                         'border-red-300 text-red-600 hover:bg-red-50'
                                       )}
@@ -1521,10 +1523,7 @@ export default function TestRuns() {
                                       }}
                                     >
                                       <AlertTriangle className="h-3 w-3 mr-1" />
-                                      {totalIssues} Issue{totalIssues > 1 ? 's' : ''} (
-                                      {failed > 0 ? `${failed}F` : ''}
-                                      {failed > 0 && blocked > 0 ? '/' : ''}
-                                      {blocked > 0 ? `${blocked}B` : ''})
+                                      {totalIssues} Issue{totalIssues > 1 ? 's' : ''}
                                       {issuesExpanded ? (
                                         <ChevronUp className="h-3 w-3 ml-1" />
                                       ) : (
@@ -1554,24 +1553,13 @@ export default function TestRuns() {
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <div
-                                    className={cn(
-                                      'px-3 py-2 border-b flex justify-between items-center',
-                                      failed > 0 ? 'bg-red-50' : 'bg-yellow-50'
-                                    )}
+                                    className="px-3 py-2 border-b flex justify-between items-center bg-red-50"
                                   >
                                     <div className="flex gap-3">
-                                      {failed > 0 && (
-                                        <span className="text-xs text-red-500 flex items-center gap-1">
-                                          <span className="w-2 h-2 rounded-full bg-red-500" />
-                                          {failed} Failed
-                                        </span>
-                                      )}
-                                      {blocked > 0 && (
-                                        <span className="text-xs text-yellow-600 flex items-center gap-1">
-                                          <span className="w-2 h-2 rounded-full bg-yellow-500" />
-                                          {blocked} Blocked
-                                        </span>
-                                      )}
+                                      <span className="text-xs text-red-500 flex items-center gap-1">
+                                        <span className="w-2 h-2 rounded-full bg-red-500" />
+                                        {failed} Failed
+                                      </span>
                                     </div>
                                     <Button
                                       variant="link"
@@ -1592,20 +1580,11 @@ export default function TestRuns() {
                                     {testsWithIssues.slice(0, 4).map((issue) => (
                                       <div
                                         key={issue.id}
-                                        className={cn(
-                                          'p-2 mb-2 rounded border-l-4',
-                                          issue.status === 'fail'
-                                            ? 'bg-red-50 border-red-500'
-                                            : 'bg-yellow-50 border-yellow-500'
-                                        )}
+                                        className="p-2 mb-2 rounded border-l-4 bg-red-50 border-red-500"
                                       >
                                         <div className="flex items-start gap-2">
                                           <Badge
-                                            variant={
-                                              issue.status === 'fail'
-                                                ? 'destructive'
-                                                : 'secondary'
-                                            }
+                                            variant="destructive"
                                             className="text-[10px] shrink-0"
                                           >
                                             #{issue.number}
@@ -1645,13 +1624,23 @@ export default function TestRuns() {
                     <div>
                       <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold text-lg">Run Details</h3>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedRun(null)}
-                        >
-                          Close
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowReportModal(true)}
+                          >
+                            <FileText className="w-4 h-4 mr-1" />
+                            Report
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedRun(null)}
+                          >
+                            Close
+                          </Button>
+                        </div>
                       </div>
 
                       <hr className="my-3" />
@@ -1987,6 +1976,15 @@ export default function TestRuns() {
           </div>
         </div>
       </main>
+
+      {/* Run Report Modal */}
+      {selectedRun && (
+        <RunReportModal
+          isOpen={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          run={selectedRun}
+        />
+      )}
     </div>
   )
 }
